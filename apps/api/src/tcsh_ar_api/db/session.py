@@ -6,10 +6,19 @@ from tcsh_ar_api.config import get_settings
 
 _settings = get_settings()
 
+# Supabase's Supavisor transaction pooler (port 6543) multiplexes many clients
+# over the same backend connection, so prepared statements cannot be cached on
+# the session. Disable both caches: `statement_cache_size` covers asyncpg's
+# own cache; `prepared_statement_cache_size` covers the SQLAlchemy-asyncpg
+# dialect's layer on top.
 engine = create_async_engine(
     _settings.database_url,
     pool_pre_ping=True,
     echo=False,
+    connect_args={
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+    },
 )
 
 SessionLocal = async_sessionmaker(

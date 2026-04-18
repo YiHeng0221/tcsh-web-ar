@@ -136,12 +136,15 @@ Supabase 系統**（publishable/secret keys、非對稱 JWKS、Supavisor pooler
    - `sb_publishable_...`（前端可用）
    - `sb_secret_...`（**機密**，只能後端，取代舊的 `service_role`）
 2. **Project Settings → Database → Connection string** — 會看到幾個頁籤
-   （**Direct / Session pooler / Transaction pooler**）。本專案兩條都要：
-   - **Transaction pooler**（port **6543**）→ 後端 runtime 用，塞進
-     `DATABASE_URL`
-   - **Session pooler**（port **5432**）→ Alembic migration 用，塞進
-     `DATABASE_URL_DIRECT`
-   - 兩個都要把開頭 `postgresql://` 換成 `postgresql+asyncpg://`
+   （**Direct / Session pooler / Transaction pooler**）。
+   - **用 Session pooler**（port **5432**）—— `DATABASE_URL` 與
+     `DATABASE_URL_DIRECT` 兩個欄位都填這條。
+   - **為什麼不用 transaction pool（6543）**：Transaction mode 是給
+     serverless 短連線情境，不支援 prepared statements；但
+     SQLAlchemy 的 asyncpg dialect 每個 query 都會 prepare()，
+     因此長期跑的 FastAPI 得用 session mode。
+   - 記得把開頭 `postgresql://` 換成 `postgresql+asyncpg://`。
+   - 密碼中的特殊字元要 URL-encode（例：`$` → `%24`、`#` → `%23`）。
 3. **JWKS endpoint** — 不用特別去 dashboard 複製，URL 格式固定：
    `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`。
    後端透過這個 URL 拿公鑰驗 JWT，**不需要再存任何 secret**，而且
