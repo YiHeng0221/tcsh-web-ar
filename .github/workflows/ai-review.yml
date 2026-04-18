@@ -1,0 +1,45 @@
+name: AI Review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ai-review-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    if: >-
+      (github.event.action == 'opened' && github.event.pull_request.draft == false) ||
+      (github.event.action == 'ready_for_review') ||
+      (github.event.action == 'labeled' && github.event.label.name == 'ai review')
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Run AI review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEW_CONTEXT_PATH: /Users/wuyiheng/Desktop/side_project/tcsh-web-ar-review/review.md
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_USER_ID: "965795042805559417"
+        run: bash .github/scripts/ai-review.sh
+
+      - name: Remove ai review label
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr edit ${{ github.event.pull_request.number }} --remove-label "ai review" 2>/dev/null || true
