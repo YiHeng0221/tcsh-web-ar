@@ -16,5 +16,14 @@ class PlacementNotFoundError(PlacementError):
 
 
 class PlacementConflictError(PlacementError):
+    """Object already has a placement at this anchor (unique constraint hit)."""
+
     status_code = 409
     detail = "object already has a placement at this anchor"
+
+
+class PlacementDependencyMissingError(PlacementError):
+    """`ar_object_id`, `anchor_id`, or `texture_id` points at a nonexistent row."""
+
+    status_code = 422
+    detail = "referenced object, anchor, or texture does not exist"

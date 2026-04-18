@@ -1,4 +1,3 @@
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -26,15 +25,13 @@ class PlacementRepository:
         return await self.session.get(Placement, placement_id)
 
     async def create(self, data: PlacementCreate) -> Placement:
-        payload = self._dump_for_db(data.model_dump())
-        placement = Placement(**payload)
+        placement = Placement(**data.model_dump())
         self.session.add(placement)
         await self.session.flush()
         return placement
 
     async def update(self, placement: Placement, data: PlacementUpdate) -> Placement:
-        updates = self._dump_for_db(data.model_dump(exclude_unset=True))
-        for key, value in updates.items():
+        for key, value in data.model_dump(exclude_unset=True).items():
             setattr(placement, key, value)
         await self.session.flush()
         return placement
@@ -42,11 +39,3 @@ class PlacementRepository:
     async def delete(self, placement: Placement) -> None:
         await self.session.delete(placement)
         await self.session.flush()
-
-    @staticmethod
-    def _dump_for_db(payload: dict[str, Any]) -> dict[str, Any]:
-        """Pydantic already emits plain JSON-compatible dicts for Transform /
-        UVTransform. This is a hook if we later need to trim or coerce types
-        before handing to SQLAlchemy.
-        """
-        return payload

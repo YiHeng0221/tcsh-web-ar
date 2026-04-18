@@ -1,7 +1,8 @@
 from datetime import datetime
+from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Vec3(BaseModel):
@@ -11,10 +12,24 @@ class Vec3(BaseModel):
 
 
 class Quat(BaseModel):
+    """Unit quaternion in (x, y, z, w) order — matches three.js / R3F."""
+
     x: float
     y: float
     z: float
     w: float
+
+    @model_validator(mode="after")
+    def _must_be_unit_length(self) -> Self:
+        magnitude_squared = (
+            self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w
+        )
+        if abs(magnitude_squared - 1.0) > 1e-3:
+            raise ValueError(
+                f"quaternion must be unit-length, got |q|²={magnitude_squared:.4f}. "
+                "Normalize on the client before sending."
+            )
+        return self
 
 
 class Transform(BaseModel):
@@ -23,6 +38,12 @@ class Transform(BaseModel):
     position: Vec3
     rotation: Quat
     scale: Vec3
+
+    @model_validator(mode="after")
+    def _scale_non_zero(self) -> Self:
+        if self.scale.x == 0 or self.scale.y == 0 or self.scale.z == 0:
+            raise ValueError("scale components must be non-zero")
+        return self
 
 
 class UVTransform(BaseModel):
@@ -48,6 +69,14 @@ class PlacementCreate(PlacementBase):
 
 
 class PlacementUpdate(BaseModel):
+    """PATCH mutates the texture and the local transform only.
+
+    `ar_object_id` / `anchor_id` are intentionally omitted: moving a
+    placement across anchors or to a different object is destructive
+    enough that it should go through DELETE + POST. Keeps the audit trail
+    readable.
+    """
+
     texture_id: UUID | None = Field(default=None)
     transform: Transform | None = None
     uv_transform: UVTransform | None = None

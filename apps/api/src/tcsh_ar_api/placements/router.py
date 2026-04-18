@@ -6,10 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tcsh_ar_api.auth.dependencies import require_admin
 from tcsh_ar_api.db.session import get_db
-from tcsh_ar_api.placements.exceptions import (
-    PlacementConflictError,
-    PlacementNotFoundError,
-)
+from tcsh_ar_api.placements.exceptions import PlacementError
 from tcsh_ar_api.placements.repository import PlacementRepository
 from tcsh_ar_api.placements.schemas import (
     PlacementCreate,
@@ -23,6 +20,10 @@ router = APIRouter(prefix="/placements", tags=["placements"])
 
 def _get_service(db: Annotated[AsyncSession, Depends(get_db)]) -> PlacementService:
     return PlacementService(PlacementRepository(db))
+
+
+def _raise_http(exc: PlacementError) -> None:
+    raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.get("", response_model=list[PlacementOut])
@@ -44,8 +45,8 @@ async def get_placement(
 ) -> PlacementOut:
     try:
         placement = await svc.get(placement_id)
-    except PlacementNotFoundError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except PlacementError as exc:
+        _raise_http(exc)
     return PlacementOut.model_validate(placement)
 
 
@@ -61,8 +62,8 @@ async def create_placement(
 ) -> PlacementOut:
     try:
         placement = await svc.create(data)
-    except PlacementConflictError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except PlacementError as exc:
+        _raise_http(exc)
     return PlacementOut.model_validate(placement)
 
 
@@ -78,10 +79,8 @@ async def update_placement(
 ) -> PlacementOut:
     try:
         placement = await svc.update(placement_id, data)
-    except PlacementNotFoundError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    except PlacementConflictError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except PlacementError as exc:
+        _raise_http(exc)
     return PlacementOut.model_validate(placement)
 
 
@@ -96,5 +95,5 @@ async def delete_placement(
 ) -> None:
     try:
         await svc.delete(placement_id)
-    except PlacementNotFoundError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except PlacementError as exc:
+        _raise_http(exc)
