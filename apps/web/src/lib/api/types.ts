@@ -195,10 +195,7 @@ export interface components {
             label: string;
             /** Size Mm */
             size_mm: number;
-            /** World Pos */
-            world_pos?: {
-                [key: string]: unknown;
-            } | null;
+            world_pos?: components["schemas"]["WorldPose"] | null;
         };
         /** AnchorOut */
         AnchorOut: {
@@ -206,10 +203,7 @@ export interface components {
             label: string;
             /** Size Mm */
             size_mm: number;
-            /** World Pos */
-            world_pos?: {
-                [key: string]: unknown;
-            } | null;
+            world_pos?: components["schemas"]["WorldPose"] | null;
             /**
              * Id
              * Format: uuid
@@ -232,10 +226,7 @@ export interface components {
             label?: string | null;
             /** Size Mm */
             size_mm?: number | null;
-            /** World Pos */
-            world_pos?: {
-                [key: string]: unknown;
-            } | null;
+            world_pos?: components["schemas"]["WorldPose"] | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -298,14 +289,25 @@ export interface components {
              */
             updated_at: string;
         };
-        /** PlacementUpdate */
+        /**
+         * PlacementUpdate
+         * @description PATCH mutates the texture and the local transform only.
+         *
+         *     `ar_object_id` / `anchor_id` are intentionally omitted: moving a
+         *     placement across anchors or to a different object is destructive
+         *     enough that it should go through DELETE + POST. Keeps the audit trail
+         *     readable.
+         */
         PlacementUpdate: {
             /** Texture Id */
             texture_id?: string | null;
             transform?: components["schemas"]["Transform"] | null;
             uv_transform?: components["schemas"]["UVTransform"] | null;
         };
-        /** Quat */
+        /**
+         * Quat
+         * @description Unit quaternion in (x, y, z, w) order — matches three.js / R3F.
+         */
         Quat: {
             /** X */
             x: number;
@@ -321,9 +323,9 @@ export interface components {
          * @description 3D pose of the object relative to its anchor's local frame.
          */
         Transform: {
-            position: components["schemas"]["Vec3"];
+            position: components["schemas"]["tcsh_ar_api__placements__schemas__Vec3"];
             rotation: components["schemas"]["Quat"];
-            scale: components["schemas"]["Vec3"];
+            scale: components["schemas"]["tcsh_ar_api__placements__schemas__Vec3"];
         };
         /**
          * UVTransform
@@ -385,8 +387,38 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * WorldPose
+         * @description Anchor's pose relative to the venue origin, if configured.
+         *
+         *     `rotation_quat` is a unit quaternion in (x, y, z, w) order; the same
+         *     convention used by three.js / R3F on the frontend, so values pass
+         *     through without transformation.
+         */
+        WorldPose: {
+            position: components["schemas"]["tcsh_ar_api__anchors__schemas__Vec3"];
+            /** Rotation Quat */
+            rotation_quat: [
+                number,
+                number,
+                number,
+                number
+            ];
+        };
+        /**
+         * Vec3
+         * @description Right-handed 3D point / vector.
+         */
+        tcsh_ar_api__anchors__schemas__Vec3: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+            /** Z */
+            z: number;
+        };
         /** Vec3 */
-        Vec3: {
+        tcsh_ar_api__placements__schemas__Vec3: {
             /** X */
             x: number;
             /** Y */
@@ -574,7 +606,7 @@ export interface operations {
     list_objects_api_objects_get: {
         parameters: {
             query?: {
-                /** @description Filter to objects placed at the given anchor */
+                /** @description Filter to objects placed at the given anchor. 404 if the anchor does not exist. */
                 anchor_id?: string | null;
             };
             header?: never;
