@@ -5,8 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from tcsh_ar_api import __version__
+from tcsh_ar_api.anchors.router import router as anchors_router
 from tcsh_ar_api.auth.service import get_jwt_service
 from tcsh_ar_api.config import get_settings
+from tcsh_ar_api.db import models as _db_models  # noqa: F401 — register all mappers
 from tcsh_ar_api.health.router import router as health_router
 
 settings = get_settings()
@@ -40,3 +42,4 @@ app.add_middleware(
 )
 
 app.include_router(health_router)
+app.include_router(anchors_router, prefix="/api")
