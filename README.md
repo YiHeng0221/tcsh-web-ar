@@ -133,19 +133,22 @@ tcsh-web-ar/
 │   │   ├── Dockerfile
 │   │   ├── package.json
 │   │   └── vite.config.ts
-│   └── api/                # FastAPI + Poetry
+│   └── api/                # FastAPI + uv
 │       ├── src/
 │       │   └── tcsh_ar_api/
 │       │       ├── main.py           # FastAPI app 進入點
 │       │       ├── config.py         # pydantic-settings 讀設定
-│       │       ├── routes/           # endpoint 模組
-│       │       ├── db/               # SQLAlchemy model、session
+│       │       ├── db/               # SQLAlchemy base + async session
+│       │       ├── health/           # health check router
 │       │       ├── auth/             # Supabase JWT 驗證
-│       │       └── storage/          # Supabase Storage helper
+│       │       ├── anchors/          # 站點 domain (router/schemas/repo/service/models)
+│       │       ├── objects/          # 物件 domain（同上結構）
+│       │       ├── placements/       # 物件 placement（同上結構）
+│       │       └── textures/         # 貼圖 domain + Supabase Storage helper
 │       ├── tests/
 │       ├── Dockerfile
 │       ├── pyproject.toml
-│       └── poetry.lock
+│       └── uv.lock
 ├── docs/
 │   ├── setup.md                      # 逐步安裝設定
 │   ├── docker.md                     # Docker 初學指南
@@ -255,7 +258,7 @@ DB / storage / auth。Docker 化以確保 dev 與部署可重現。
 | 表單 / 驗證        | React Hook Form + Zod                               |
 | 後端語言           | **Python 3.12**                                     |
 | 後端框架           | **FastAPI**                                         |
-| Python 依賴管理    | **Poetry**                                          |
+| Python 依賴管理    | **uv**（Rust-based、PEP 621）                       |
 | ORM / DB client    | SQLAlchemy 2.0 + `asyncpg`（async）                 |
 | Schema / model     | Pydantic v2                                         |
 | 資料庫             | **Supabase（託管 Postgres）**                       |
@@ -282,7 +285,7 @@ service」。減少小團隊的 ops 維運面。
 完整的初學者版走訪看 **[`docs/setup.md`](docs/setup.md)**。速覽版：
 
 ```bash
-# 前置：Python 3.12+、Poetry 1.8+、Bun 1.1+、Docker Desktop
+# 前置：Python 3.12+、uv 0.4+、Bun 1.1+、Docker Desktop
 
 # 一次性安裝
 make install
@@ -303,7 +306,7 @@ make docker-up
 
 | 指令                | 做什麼                                                |
 | ------------------- | ----------------------------------------------------- |
-| `make install`      | 安裝 Python（Poetry）與 JS（Bun）依賴                 |
+| `make install`      | 安裝 Python（uv）與 JS（Bun）依賴                     |
 | `make dev`          | 本地同時啟動 api 與 web dev server                    |
 | `make dev-api`      | 只跑 FastAPI server                                   |
 | `make dev-web`      | 只跑 Vite dev server                                  |

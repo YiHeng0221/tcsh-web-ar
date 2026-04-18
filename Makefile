@@ -4,7 +4,7 @@
 help:
 	@echo "tcsh-web-ar — Makefile targets"
 	@echo ""
-	@echo "  make install        Install Python (Poetry) and JS (Bun) deps"
+	@echo "  make install        Install Python (uv) and JS (Bun) deps"
 	@echo "  make dev            Run api + web dev servers locally (two processes)"
 	@echo "  make dev-api        Run only the FastAPI server"
 	@echo "  make dev-web        Run only the Vite dev server"
@@ -22,19 +22,19 @@ help:
 
 # ─── install ──────────────────────────────────────────────────────────
 install:
-	cd apps/api && poetry install
+	cd apps/api && uv sync
 	cd apps/web && bun install
 
 # ─── dev (local, no docker) ───────────────────────────────────────────
 dev:
 	@echo "Starting api and web in parallel. Ctrl-C stops both."
 	@trap 'kill 0' EXIT; \
-	  (cd apps/api && poetry run uvicorn tcsh_ar_api.main:app --reload --host 0.0.0.0 --port 8000) & \
+	  (cd apps/api && uv run uvicorn tcsh_ar_api.main:app --reload --host 0.0.0.0 --port 8000) & \
 	  (cd apps/web && bun run dev) & \
 	  wait
 
 dev-api:
-	cd apps/api && poetry run uvicorn tcsh_ar_api.main:app --reload --host 0.0.0.0 --port 8000
+	cd apps/api && uv run uvicorn tcsh_ar_api.main:app --reload --host 0.0.0.0 --port 8000
 
 dev-web:
 	cd apps/web && bun run dev
@@ -53,21 +53,21 @@ docker-build:
 lint: lint-api lint-web
 
 lint-api:
-	cd apps/api && poetry run ruff check src tests 2>/dev/null || poetry run ruff check src
+	cd apps/api && uv run ruff check src tests 2>/dev/null || uv run ruff check src
 
 lint-web:
 	cd apps/web && bun run lint
 
 format:
-	cd apps/api && poetry run ruff format src
+	cd apps/api && uv run ruff format src
 	cd apps/web && bun run lint --fix || true
 
 typecheck:
-	cd apps/api && poetry run mypy
+	cd apps/api && uv run mypy
 	cd apps/web && bun run typecheck
 
 test:
-	cd apps/api && poetry run pytest
+	cd apps/api && uv run pytest
 	cd apps/web && bun test || true
 
 # ─── clean ────────────────────────────────────────────────────────────

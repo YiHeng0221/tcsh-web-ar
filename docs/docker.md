@@ -65,30 +65,35 @@ FROM python:3.12-slim AS builder
 階段命名，這樣後面可以 reference。
 
 ```dockerfile
-ENV POETRY_VERSION=1.8.4 \
-    POETRY_VIRTUALENVS_CREATE=false \
-    POETRY_NO_INTERACTION=1 \
-    PIP_NO_CACHE_DIR=1
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 ```
-設定 Poetry：裝進系統 site-packages（container 本身就是隔離邊界，
-不需要再包一層 virtualenv），而且不要跟 user 互動。
+把 uv 的 binary 從 Astral 官方 image 直接複製進來。不需要 `pip install uv`，
+就是一個 static binary。
 
 ```dockerfile
-RUN pip install "poetry==$POETRY_VERSION"
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
 ```
-裝 Poetry 本身。
+- `UV_LINK_MODE=copy` — container 裡不要用 hardlink（不同 layer 會有
+  檔案系統邊界，用 copy 比較可靠）。
+- `UV_COMPILE_BYTECODE=1` — 預編譯 `.pyc`，container 啟動更快。
+- `UV_PROJECT_ENVIRONMENT=/app/.venv` — 指定 venv 位置。
 
 ```dockerfile
 WORKDIR /app
-COPY pyproject.toml poetry.lock* ./
+COPY pyproject.toml uv.lock ./
 ```
 設定工作目錄，**只**複製依賴清單檔。在複製原始碼前先做這步是一個
 **快取技巧**：如果你改原始碼但沒改依賴，Docker 可以重用這層快取。
 
 ```dockerfile
-RUN poetry install --only main --no-root
+RUN uv sync --frozen --no-dev --no-install-project
 ```
-裝 runtime（非 dev）依賴。
+- `--frozen` — 如果 `uv.lock` 落後 `pyproject.toml` 就直接錯，不自動更新
+  （確保 image 一定用被 lock 的版本）。
+- `--no-dev` — 不裝 dev dependencies（runtime 不需要 pytest/ruff）。
+- `--no-install-project` — 先不把本專案裝進去，等第二階段才複製原始碼。
 
 ```dockerfile
 FROM python:3.12-slim AS runtime
@@ -98,18 +103,19 @@ FROM python:3.12-slim AS runtime
 ```dockerfile
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/usr/local/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH"
 ```
 - `PYTHONDONTWRITEBYTECODE=1` — 不要產生 `.pyc` 檔（減少 image 雜訊）。
 - `PYTHONUNBUFFERED=1` — stdout 不要 buffer，這樣 `docker logs` 可以
   即時看到 log。
+- `PATH=/app/.venv/bin:$PATH` — 把 venv 的 bin 放在 PATH 最前面，這樣
+  `uvicorn` 會直接指到 venv 裡的那支。
 
 ```dockerfile
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /app/.venv /app/.venv
 ```
-把 builder 階段裝好的 packages 複製到 runtime image。我們不複製
-Poetry 本身也不複製 build toolchain——runtime image 越精簡越好。
+把 builder 階段裝好的整個 venv 複製到 runtime image。一個完整的 venv
+目錄比 site-packages 複製乾淨很多。
 
 ```dockerfile
 COPY src ./src
@@ -239,10 +245,12 @@ docker system prune -a
 
 ## 8. Build 失敗的 debug
 
-**症狀：** `poetry install` 在 build 中途失敗。
+**症狀：** `uv sync` 在 build 中途失敗。
 試試：`docker compose build --no-cache api`。如果錯誤訊息是缺某個系統
 library（例如 `libpq-dev`），用 `RUN apt-get update && apt-get
-install -y libpq-dev` 加上去。
+install -y libpq-dev` 加上去。另一個常見錯誤是 `uv.lock` 落後於
+`pyproject.toml`（因為我們加了 `--frozen`）——這時要在本地跑 `uv sync`
+更新 lockfile 再 commit。
 
 **症狀：** `bun install` 失敗，訊息是「lockfile out of sync」。
 修法：刪掉 `apps/web/bun.lockb` 重 build。然後把新的 lockfile commit 上去。

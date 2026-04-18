@@ -1,7 +1,7 @@
 # 安裝設定指南
 
 這份文件帶你一步一步在全新機器上把 `tcsh-web-ar` 跑起來。針對**有寫過
-程式，但還沒用過 Poetry、Bun、Docker** 的讀者寫的。
+程式，但還沒用過 uv、Bun、Docker** 的讀者寫的。
 
 如果你只要快速版，看根目錄 `README.md` 最前面就好。
 
@@ -10,14 +10,17 @@
 ## 0. 接下來要裝的東西
 
 - **Python 3.12** — 後端語言。
-- **Poetry** — Python 的套件管理工具。可以把它想成 Python 版的 `npm`：
-  它讀 `pyproject.toml`、鎖定版本、幫你管理 virtual environment。
+- **uv** — Python 的套件管理工具。可以把它想成「更快版的 pip + venv + poetry
+  三合一」：它讀 `pyproject.toml`、寫 `uv.lock` 鎖定版本、幫你管理
+  virtual environment，底層是 Rust 寫的，速度比 Poetry 快一個數量級。
+  從 2026-04-18 起本專案改用 uv；遷移過程與原因看
+  `docs/dev-journal/2026-04-18-poetry-to-uv-migration.md`。
 - **Bun** — 一個超快的 JavaScript runtime + 套件管理 + bundler。
   我們用它取代 `npm`，因為比較快、安裝比較乾淨。
 - **Docker Desktop** — 用來跑容器的。你會用它來一鍵啟動整個 stack。
   Docker 附帶 `docker compose`，可以用一個 YAML 檔同時管理多個容器。
 
-不一定每個都要裝——如果只改前端，可以暫時跳過 Python/Poetry。但要跑
+不一定每個都要裝——如果只改前端，可以暫時跳過 Python/uv。但要跑
 完整 stack 就四個都要。
 
 ---
@@ -39,13 +42,24 @@ python3.12 --version  # → Python 3.12.x
 which python3.12
 ```
 
-### 1.2 Poetry
+### 1.2 uv
+
+uv 是 Astral 團隊寫的 Rust-based Python 工具。用官方安裝 script 或 Homebrew
+擇一：
 
 ```bash
-curl -sSL https://install.python-poetry.org | python3 -
-# 重新開 terminal，或照安裝程式印出來的 PATH 指示做
-poetry --version  # → Poetry (version 1.8.x)
+# 方式 A：官方 install script（最萬用）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# 重新開 terminal 或依指示 source 對應的 shell rc
+
+# 方式 B：Homebrew（macOS）
+brew install uv
+
+uv --version  # → uv 0.4.x 或更新
 ```
+
+uv 不需要先有 Python——它可以幫你自動下載對應版本的 Python（`uv python install 3.12`）。
+但如果前一步已經裝了 `python3.12`，uv 會偵測到並直接用。
 
 ### 1.3 Bun
 
@@ -144,26 +158,25 @@ cp apps/web/.env.example apps/web/.env
 make install
 ```
 
-這會在 `apps/api` 跑 `poetry install`，在 `apps/web` 跑 `bun install`。
+這會在 `apps/api` 跑 `uv sync`，在 `apps/web` 跑 `bun install`。
 
 ### 4.1 剛剛發生了什麼？
 
-- **Poetry** 幫這個專案建立了一個 virtual environment（獨立的 Python
-  安裝環境）並從 `pyproject.toml` 裝好所有套件。可以在 `apps/api`
-  裡用 `poetry env info` 看它放在哪。
+- **uv** 幫這個專案建立了一個 virtual environment（獨立的 Python 安裝環境
+  在 `apps/api/.venv/`）、按 `uv.lock` 裝好所有套件。第一次沒有 lockfile 時
+  uv 會先解析 pyproject.toml 產生 `uv.lock`，把它 commit 進 repo。
 - **Bun** 寫出 `bun.lockb` lockfile，並把套件裝進 `apps/web/node_modules/`。
 
 ### 4.2 手動使用 virtualenv（參考知識）
 
-你幾乎不會需要手動操作——`poetry run <cmd>` 跟 `poetry shell` 就夠用
-了——但為了學習：
+你幾乎不會需要手動操作——`uv run <cmd>` 會自動用專案的 venv。但為了
+學習：
 
 ```bash
 cd apps/api
-poetry env activate   # 會印出啟動指令；執行它進入 venv
-# ...在 venv 裡...
+source .venv/bin/activate      # 進入 venv
 python -c "import fastapi; print(fastapi.__version__)"
-deactivate
+deactivate                     # 退出 venv
 ```
 
 ---
@@ -235,7 +248,7 @@ Dockerfile 跟 compose 檔每一段在做什麼，看 `docs/docker.md`。
 | 開始寫 code，不要容器          | `make dev`                 |
 | 用瀏覽器互動測試 API           | http://localhost:8000/docs |
 | 確認整個 app 端對端能跑        | `make docker-up`           |
-| 加一個 Python 依賴              | `cd apps/api && poetry add <pkg>` |
+| 加一個 Python 依賴              | `cd apps/api && uv add <pkg>` |
 | 加一個 JS 依賴                  | `cd apps/web && bun add <pkg>`    |
 | commit 前：lint + typecheck     | `make lint && make typecheck`     |
 | commit 前：跑測試               | `make test`                       |
@@ -245,7 +258,7 @@ Dockerfile 跟 compose 檔每一段在做什麼，看 `docs/docker.md`。
 
 ## 8. 常見地雷
 
-- **`poetry: command not found`** 裝完之後——重新開 terminal，或是
+- **`uv: command not found`** 裝完之後——重新開 terminal，或是
   把 `export PATH="$HOME/.local/bin:$PATH"` 加到你的 shell rc 檔。
 - **Bun install 錯誤提到 "lockb" 損毀** — 刪掉 `apps/web/bun.lockb`
   跟 `apps/web/node_modules`，再 `bun install` 一次。

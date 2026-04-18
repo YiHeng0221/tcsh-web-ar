@@ -1,30 +1,33 @@
-# ───────────── stage 1: install dependencies with Poetry ─────────────
+# ───────────── stage 1: install dependencies with uv ─────────────
 FROM python:3.12-slim AS builder
 
-ENV POETRY_VERSION=1.8.4 \
-    POETRY_VIRTUALENVS_CREATE=false \
-    POETRY_NO_INTERACTION=1 \
-    PIP_NO_CACHE_DIR=1
+# Copy the uv binary from Astral's official image (no pip install needed)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-RUN pip install "poetry==$POETRY_VERSION"
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock* ./
+# Copy lockfile + pyproject first so dep-install layer caches on code changes
+COPY pyproject.toml uv.lock ./
 
-RUN poetry install --only main --no-root
+# --frozen: fail if uv.lock is stale; --no-dev: skip dev deps; --no-install-project: defer
+# installing the project itself until the source is copied in the runtime stage
+RUN uv sync --frozen --no-dev --no-install-project
 
 # ───────────── stage 2: runtime image ─────────────
 FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/usr/local/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+# Bring in the prebuilt venv from the builder stage
+COPY --from=builder /app/.venv /app/.venv
 
 COPY src ./src
 COPY pyproject.toml ./

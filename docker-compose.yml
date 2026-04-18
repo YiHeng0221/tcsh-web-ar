@@ -1,7 +1,7 @@
 # Docker Compose — dev/demo environment.
 #
 # Runs the FastAPI backend and the nginx-served React build in containers.
-# For day-to-day development we recommend `make dev` (native Poetry + Bun)
+# For day-to-day development we recommend `make dev` (native uv + Bun)
 # for faster iteration; `make docker-up` is for reproducing the production
 # build locally or sharing a single-command setup.
 

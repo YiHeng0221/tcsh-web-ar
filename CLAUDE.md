@@ -29,7 +29,7 @@ object storage.
 ```
 apps/
   web/        # React + Vite + Bun SPA (all three modes, code-split)
-  api/        # FastAPI + Poetry JSON API
+  api/        # FastAPI + uv JSON API
 docs/
   setup.md            # step-by-step beginner setup
   docker.md           # Docker beginner guide
@@ -66,7 +66,7 @@ spec via `openapi-typescript`. Do not hand-write matching TS types.
 
 - Language: **Python 3.12**
 - Framework: **FastAPI**
-- Deps: **Poetry** (not pip / uv — user requested Poetry)
+- Deps: **uv** (fast, Rust-based, PEP 621 `[project]` + `uv.lock`)
 - ASGI server (dev): **uvicorn --reload**
 - ASGI server (prod): **uvicorn** behind a reverse proxy, or **gunicorn**
   with uvicorn workers
@@ -92,8 +92,9 @@ spec via `openapi-typescript`. Do not hand-write matching TS types.
 
 - **Vite instead of Next.js:** Next's SSR / App Router adds complexity we
   don't need (SPA with camera / WebGL, not a content site).
-- **Poetry over uv:** user preference. If that changes, `uv` is faster and
-  worth revisiting.
+- **uv over Poetry:** migrated 2026-04-18 — an order of magnitude faster,
+  standard `[project]` table, single static binary. See
+  [`docs/dev-journal/2026-04-18-poetry-to-uv-migration.md`](docs/dev-journal/2026-04-18-poetry-to-uv-migration.md).
 - **Supabase:** removes ops surface (self-hosted Postgres + S3 + auth
   service) — one dashboard, one bill.
 

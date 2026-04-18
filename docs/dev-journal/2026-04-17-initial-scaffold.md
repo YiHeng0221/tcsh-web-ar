@@ -1,5 +1,9 @@
 # 2026-04-17 — 初始 Scaffold
 
+> **📝 Addendum 2026-04-18：** 本日初稿採用 Poetry 管理 Python 依賴，
+> 2026-04-18 已全面遷移到 uv。下文歷史紀錄保留 Poetry 相關描述，實際
+> 現況與指令請以 `docs/dev-journal/2026-04-18-poetry-to-uv-migration.md` 為準。
+
 **目標：** 把空的 `2enter/tcsh-web-ar` repo 建成一個可跑的 monorepo，
 含 FastAPI 後端、React + Vite + Bun 前端、完整的 Docker 支援、以及
 教學品質的文件。

@@ -181,9 +181,9 @@ Migration 走 **Alembic**：
 
 ```bash
 cd apps/api
-poetry run alembic init -t async alembic      # 一次性初始化
-poetry run alembic revision --autogenerate -m "create artworks table"
-poetry run alembic upgrade head
+uv run alembic init -t async alembic      # 一次性初始化
+uv run alembic revision --autogenerate -m "create artworks table"
+uv run alembic upgrade head
 ```
 
 ---
@@ -230,7 +230,7 @@ async def test_health():
     assert r.json()["status"] == "ok"
 ```
 
-用 `make test` 或 `poetry run pytest` 跑。
+用 `make test` 或 `uv run pytest` 跑。
 
 ---
 
