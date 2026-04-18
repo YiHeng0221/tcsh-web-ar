@@ -124,29 +124,41 @@ cp apps/web/.env.example apps/web/.env
 
 ### 3.1 Supabase 憑證
 
-你需要一個 Supabase 專案（免費方案就夠了）。從 Supabase dashboard：
+你需要一個 Supabase 專案（免費方案就夠了）。本專案採用 **2025 後的新
+Supabase 系統**（publishable/secret keys、非對稱 JWKS、Supavisor pooler
+兩條 URL）。如果你是從舊教學過來的請注意這幾個已不是 `anon` /
+`service_role` / 靜態 `JWT_SECRET` 了。
 
-1. **Project Settings → API** → 複製 `URL`、`anon public` key、跟
-   `service_role` key（最後這個是**機密**——絕對不要貼到前端或公開的
-   commit 裡）。
-2. **Project Settings → Database → Connection string → URI** — 複製
-   並貼到後端 `.env` 的 `DATABASE_URL`。你需要把 `postgresql://`
-   開頭換成 `postgresql+asyncpg://`，這樣 SQLAlchemy 才會用 async
-   driver。
-3. **Project Settings → API → JWT Settings → JWT Secret** — 貼到後端
-   的 `SUPABASE_JWT_SECRET`。
+**從 Supabase dashboard 抓以下內容：**
 
-最後的填值：
+1. **Project Settings → API Keys**（新 tab，不是舊的「API」分頁）
+   → 若尚未啟用新制，點 `Create new API Keys`。會拿到：
+   - `sb_publishable_...`（前端可用）
+   - `sb_secret_...`（**機密**，只能後端，取代舊的 `service_role`）
+2. **Project Settings → Database → Connection string** — 會看到幾個頁籤
+   （**Direct / Session pooler / Transaction pooler**）。本專案兩條都要：
+   - **Transaction pooler**（port **6543**）→ 後端 runtime 用，塞進
+     `DATABASE_URL`
+   - **Session pooler**（port **5432**）→ Alembic migration 用，塞進
+     `DATABASE_URL_DIRECT`
+   - 兩個都要把開頭 `postgresql://` 換成 `postgresql+asyncpg://`
+3. **JWKS endpoint** — 不用特別去 dashboard 複製，URL 格式固定：
+   `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`。
+   後端透過這個 URL 拿公鑰驗 JWT，**不需要再存任何 secret**，而且
+   Supabase 要 rotate key 時你不用重新部署。
+
+**最後的填值：**
 
 - `apps/api/.env`
-  - `DATABASE_URL=postgresql+asyncpg://...`
+  - `DATABASE_URL=postgresql+asyncpg://postgres.xxx:PW@aws-0-REGION.pooler.supabase.com:6543/postgres`
+  - `DATABASE_URL_DIRECT=postgresql+asyncpg://postgres.xxx:PW@aws-0-REGION.pooler.supabase.com:5432/postgres`
   - `SUPABASE_URL=https://xxxx.supabase.co`
-  - `SUPABASE_ANON_KEY=eyJ...`
-  - `SUPABASE_SERVICE_ROLE_KEY=eyJ...`   # ← 只能在後端！
-  - `SUPABASE_JWT_SECRET=...`
+  - `SUPABASE_PUBLISHABLE_KEY=sb_publishable_...`
+  - `SUPABASE_SECRET_KEY=sb_secret_...`   # ← 只能在後端！
+  - `SUPABASE_JWKS_URL=https://xxxx.supabase.co/auth/v1/.well-known/jwks.json`
 - `apps/web/.env`
   - `VITE_SUPABASE_URL=https://xxxx.supabase.co`
-  - `VITE_SUPABASE_ANON_KEY=eyJ...`      # ← 可以安全放在瀏覽器
+  - `VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...`   # ← 可以安全放瀏覽器
 
 ---
 
