@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from tcsh_ar_api import __version__
 from tcsh_ar_api.config import get_settings
-from tcsh_ar_api.routes import artworks, health
+from tcsh_ar_api.health.router import router as health_router
 
 settings = get_settings()
 
@@ -23,5 +23,4 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(health.router)
-app.include_router(artworks.router)
+app.include_router(health_router)
