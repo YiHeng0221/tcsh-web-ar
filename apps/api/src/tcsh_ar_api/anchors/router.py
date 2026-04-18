@@ -4,10 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tcsh_ar_api.anchors.exceptions import (
-    AnchorLabelConflictError,
-    AnchorNotFoundError,
-)
+from tcsh_ar_api.anchors.exceptions import AnchorError
 from tcsh_ar_api.anchors.repository import AnchorRepository
 from tcsh_ar_api.anchors.schemas import AnchorCreate, AnchorOut, AnchorUpdate
 from tcsh_ar_api.anchors.service import AnchorService
@@ -19,6 +16,11 @@ router = APIRouter(prefix="/anchors", tags=["anchors"])
 
 def _get_service(db: Annotated[AsyncSession, Depends(get_db)]) -> AnchorService:
     return AnchorService(AnchorRepository(db))
+
+
+def _raise_http(exc: AnchorError) -> None:
+    """Convert a domain error into HTTPException using its declared status/detail."""
+    raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.get("", response_model=list[AnchorOut])
@@ -36,8 +38,8 @@ async def get_anchor(
 ) -> AnchorOut:
     try:
         anchor = await svc.get(anchor_id)
-    except AnchorNotFoundError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except AnchorError as exc:
+        _raise_http(exc)
     return AnchorOut.model_validate(anchor)
 
 
@@ -53,8 +55,8 @@ async def create_anchor(
 ) -> AnchorOut:
     try:
         anchor = await svc.create(data)
-    except AnchorLabelConflictError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except AnchorError as exc:
+        _raise_http(exc)
     return AnchorOut.model_validate(anchor)
 
 
@@ -70,10 +72,8 @@ async def update_anchor(
 ) -> AnchorOut:
     try:
         anchor = await svc.update(anchor_id, data)
-    except AnchorNotFoundError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    except AnchorLabelConflictError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except AnchorError as exc:
+        _raise_http(exc)
     return AnchorOut.model_validate(anchor)
 
 
@@ -88,5 +88,5 @@ async def delete_anchor(
 ) -> None:
     try:
         await svc.delete(anchor_id)
-    except AnchorNotFoundError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except AnchorError as exc:
+        _raise_http(exc)
