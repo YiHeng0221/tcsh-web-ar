@@ -1,0 +1,16 @@
+Alembic migrations for tcsh-ar-api.
+
+Common commands:
+
+    # create a new migration from current models
+    uv run alembic revision --autogenerate -m "short description"
+
+    # apply all pending migrations
+    uv run alembic upgrade head
+
+    # roll back one
+    uv run alembic downgrade -1
+
+env.py is adapted for SQLAlchemy 2.0 async + asyncpg. Whenever a new domain
+module is added under src/tcsh_ar_api/<module>/models.py, append the
+corresponding `import` line in env.py so autogenerate sees the models.
