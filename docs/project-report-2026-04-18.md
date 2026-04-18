@@ -53,7 +53,7 @@
 | --- | --- | --- |
 | 語言 | Python 3.12 | 團隊偏好 |
 | 框架 | FastAPI | 自動產生 OpenAPI 文件、型別安全、async 支援 |
-| 依賴管理 | Poetry | 團隊偏好 |
+| 依賴管理 | uv | 2026-04-18 從 Poetry 遷移；速度快、PEP 621 標準 |
 | ORM | SQLAlchemy 2.0（async） | 與 asyncpg 整合 |
 
 ### 2.3 基礎設施
