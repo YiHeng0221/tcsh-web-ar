@@ -12,6 +12,7 @@ from tcsh_ar_api.db import models as _db_models  # noqa: F401 — register all m
 from tcsh_ar_api.health.router import router as health_router
 from tcsh_ar_api.objects.router import router as objects_router
 from tcsh_ar_api.placements.router import router as placements_router
+from tcsh_ar_api.textures.router import router as textures_router
 
 settings = get_settings()
 
@@ -47,3 +48,4 @@ app.include_router(health_router)
 app.include_router(anchors_router, prefix="/api")
 app.include_router(objects_router, prefix="/api")
 app.include_router(placements_router, prefix="/api")
+app.include_router(textures_router, prefix="/api")
