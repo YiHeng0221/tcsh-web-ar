@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from functools import lru_cache
 from typing import Any
@@ -17,6 +18,16 @@ from tcsh_ar_api.config import get_settings
 # often for no benefit; a longer TTL would delay key rotation.
 _JWKS_TTL_SECONDS: float = 600.0
 
+# Minimum gap between forced JWKS refreshes. Prevents an attacker who sends
+# tokens with random `kid` values from amplifying into unbounded network
+# calls to Supabase.
+_FORCE_REFRESH_THROTTLE_SECONDS: float = 30.0
+
+# Hardcoded allow-list — NEVER trust the `alg` from the token header. If
+# Supabase ever changes its default signing algorithm this must be updated
+# in lockstep (and in the JWKS key schema check below).
+_ALLOWED_ALGS: tuple[str, ...] = ("ES256",)
+
 
 class JWTService:
     """Verifies Supabase-issued JWTs against the project's JWKS.
@@ -24,7 +35,8 @@ class JWTService:
     A single instance is shared across the process (created via
     `get_jwt_service()`). The JWKS is fetched lazily on first use and
     cached for `_JWKS_TTL_SECONDS`. On `kid` miss, the cache is forced to
-    refresh once — this covers Supabase key rotations without a restart.
+    refresh at most once per `_FORCE_REFRESH_THROTTLE_SECONDS` — enough to
+    recover from a genuine key rotation, not enough to be a DoS amplifier.
     """
 
     def __init__(self, jwks_url: str, audience: str = "authenticated") -> None:
@@ -32,29 +44,38 @@ class JWTService:
         self._audience = audience
         self._jwks: dict[str, Any] | None = None
         self._fetched_at: float = 0.0
+        self._last_force_refresh: float = 0.0
+        self._fetch_lock = asyncio.Lock()
 
     async def _fetch_jwks(self, *, force: bool = False) -> dict[str, Any]:
-        now = time.monotonic()
-        if (
-            not force
-            and self._jwks is not None
-            and (now - self._fetched_at) < _JWKS_TTL_SECONDS
-        ):
+        async with self._fetch_lock:
+            now = time.monotonic()
+            if (
+                not force
+                and self._jwks is not None
+                and (now - self._fetched_at) < _JWKS_TTL_SECONDS
+            ):
+                return self._jwks
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(self._jwks_url)
+                response.raise_for_status()
+                self._jwks = response.json()
+                self._fetched_at = now
+                if force:
+                    self._last_force_refresh = now
+            assert self._jwks is not None
             return self._jwks
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(self._jwks_url)
-            response.raise_for_status()
-            self._jwks = response.json()
-            self._fetched_at = now
-        assert self._jwks is not None
-        return self._jwks
 
     async def _find_key(self, kid: str) -> dict[str, Any]:
         jwks = await self._fetch_jwks()
         for key in jwks.get("keys", []):
             if key.get("kid") == kid:
                 return key  # type: ignore[no-any-return]
-        # Miss — force a refresh in case Supabase rotated keys.
+        # Miss. Only force-refresh if we haven't recently — otherwise an
+        # attacker flooding unknown kids could amplify into JWKS fetches.
+        now = time.monotonic()
+        if (now - self._last_force_refresh) < _FORCE_REFRESH_THROTTLE_SECONDS:
+            raise InvalidTokenError(f"no JWKS key matches kid={kid}")
         jwks = await self._fetch_jwks(force=True)
         for key in jwks.get("keys", []):
             if key.get("kid") == kid:
@@ -69,9 +90,13 @@ class JWTService:
         kid = headers.get("kid")
         if not kid:
             raise InvalidTokenError("token header is missing kid")
-        alg = headers.get("alg")
-        if not alg:
-            raise InvalidTokenError("token header is missing alg")
+
+        header_alg = headers.get("alg")
+        if header_alg not in _ALLOWED_ALGS:
+            # Reject before touching the key. Prevents JWT `alg` confusion:
+            # attacker header-declares `HS256`, forcing us to treat the RSA/EC
+            # public key as a symmetric secret and validating forgeries.
+            raise InvalidTokenError(f"unsupported alg: {header_alg!r}")
 
         key = await self._find_key(kid)
 
@@ -79,9 +104,9 @@ class JWTService:
             claims = jwt.decode(
                 token,
                 key,
-                algorithms=[alg],
+                algorithms=list(_ALLOWED_ALGS),
                 audience=self._audience,
-                options={"verify_aud": True},
+                options={"verify_aud": True, "verify_exp": True},
             )
         except JWTError as exc:
             raise InvalidTokenError(str(exc)) from exc
@@ -91,7 +116,11 @@ class JWTService:
 
 @lru_cache(maxsize=1)
 def get_jwt_service() -> JWTService:
-    """Returns the process-wide JWTService, configured from settings."""
+    """Returns the process-wide JWTService, configured from settings.
+
+    Called eagerly at app startup (see `main.lifespan`) so a missing JWKS
+    URL blows up on boot instead of on the first protected request.
+    """
     settings = get_settings()
     if not settings.supabase_jwks_url:
         raise RuntimeError(
