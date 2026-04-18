@@ -1,0 +1,77 @@
+.PHONY: help install dev dev-api dev-web docker-up docker-down docker-build \
+        lint lint-api lint-web format typecheck test clean
+
+help:
+	@echo "tcsh-web-ar — Makefile targets"
+	@echo ""
+	@echo "  make install        Install Python (Poetry) and JS (Bun) deps"
+	@echo "  make dev            Run api + web dev servers locally (two processes)"
+	@echo "  make dev-api        Run only the FastAPI server"
+	@echo "  make dev-web        Run only the Vite dev server"
+	@echo ""
+	@echo "  make docker-up      Build images and start all containers"
+	@echo "  make docker-down    Stop and remove containers"
+	@echo "  make docker-build   Rebuild images without starting"
+	@echo ""
+	@echo "  make lint           Run ruff (api) and eslint (web)"
+	@echo "  make format         Auto-format Python + TS"
+	@echo "  make typecheck      mypy (api) + tsc --noEmit (web)"
+	@echo "  make test           pytest + vitest"
+	@echo ""
+	@echo "  make clean          Remove caches, build outputs, node_modules"
+
+# ─── install ──────────────────────────────────────────────────────────
+install:
+	cd apps/api && poetry install
+	cd apps/web && bun install
+
+# ─── dev (local, no docker) ───────────────────────────────────────────
+dev:
+	@echo "Starting api and web in parallel. Ctrl-C stops both."
+	@trap 'kill 0' EXIT; \
+	  (cd apps/api && poetry run uvicorn tcsh_ar_api.main:app --reload --host 0.0.0.0 --port 8000) & \
+	  (cd apps/web && bun run dev) & \
+	  wait
+
+dev-api:
+	cd apps/api && poetry run uvicorn tcsh_ar_api.main:app --reload --host 0.0.0.0 --port 8000
+
+dev-web:
+	cd apps/web && bun run dev
+
+# ─── docker ───────────────────────────────────────────────────────────
+docker-up:
+	docker compose up --build
+
+docker-down:
+	docker compose down
+
+docker-build:
+	docker compose build
+
+# ─── quality ──────────────────────────────────────────────────────────
+lint: lint-api lint-web
+
+lint-api:
+	cd apps/api && poetry run ruff check src tests 2>/dev/null || poetry run ruff check src
+
+lint-web:
+	cd apps/web && bun run lint
+
+format:
+	cd apps/api && poetry run ruff format src
+	cd apps/web && bun run lint --fix || true
+
+typecheck:
+	cd apps/api && poetry run mypy
+	cd apps/web && bun run typecheck
+
+test:
+	cd apps/api && poetry run pytest
+	cd apps/web && bun test || true
+
+# ─── clean ────────────────────────────────────────────────────────────
+clean:
+	rm -rf apps/web/node_modules apps/web/dist
+	rm -rf apps/api/.venv apps/api/.pytest_cache apps/api/.mypy_cache apps/api/.ruff_cache
+	find . -type d -name __pycache__ -exec rm -rf {} +
