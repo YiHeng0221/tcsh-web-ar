@@ -10,7 +10,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from tcsh_ar_api.config import get_settings
 from tcsh_ar_api.db.base import Base
@@ -23,20 +23,23 @@ from tcsh_ar_api.textures import models as _textures_models  # noqa: F401
 
 config = context.config
 
-# Override sqlalchemy.url from our Settings (reads .env)
-_settings = get_settings()
-config.set_main_option("sqlalchemy.url", _settings.database_url)
-
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Migrations always use the direct / session-mode URL — the transaction pool
+# on port 6543 does not support DDL reliably since Supavisor 2025-02-28.
+# We pass the URL directly to the engine rather than round-tripping through
+# alembic.ini's configparser (which would try to % -interpolate any percent
+# signs in the password).
+_settings = get_settings()
+_DATABASE_URL = _settings.database_url_direct
 
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=_DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -52,11 +55,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = create_async_engine(_DATABASE_URL, poolclass=pool.NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()
