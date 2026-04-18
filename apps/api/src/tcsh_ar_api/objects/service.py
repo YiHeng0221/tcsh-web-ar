@@ -1,6 +1,13 @@
 from uuid import UUID
 
-from tcsh_ar_api.objects.exceptions import ARObjectNotFoundError
+from sqlalchemy.exc import IntegrityError
+
+from tcsh_ar_api.anchors.repository import AnchorRepository
+from tcsh_ar_api.objects.exceptions import (
+    ARObjectAnchorFilterError,
+    ARObjectConflictError,
+    ARObjectNotFoundError,
+)
 from tcsh_ar_api.objects.models import ARObject
 from tcsh_ar_api.objects.repository import ARObjectRepository
 from tcsh_ar_api.objects.schemas import ARObjectCreate, ARObjectUpdate
@@ -9,10 +16,21 @@ from tcsh_ar_api.objects.schemas import ARObjectCreate, ARObjectUpdate
 class ARObjectService:
     """Business logic and transaction boundary for the ar_objects domain."""
 
-    def __init__(self, repo: ARObjectRepository) -> None:
+    def __init__(
+        self,
+        repo: ARObjectRepository,
+        anchor_repo: AnchorRepository,
+    ) -> None:
         self.repo = repo
+        self.anchor_repo = anchor_repo
 
     async def list_all(self, anchor_id: UUID | None = None) -> list[ARObject]:
+        if anchor_id is not None:
+            anchor = await self.anchor_repo.get(anchor_id)
+            if anchor is None:
+                # Fail loud so Mode A's frontend learns early that it's filtering
+                # on a stale / wrong UUID instead of silently rendering nothing.
+                raise ARObjectAnchorFilterError()
         return await self.repo.list_all(anchor_id=anchor_id)
 
     async def get(self, object_id: UUID) -> ARObject:
@@ -22,15 +40,23 @@ class ARObjectService:
         return ar_object
 
     async def create(self, data: ARObjectCreate) -> ARObject:
-        ar_object = await self.repo.create(data)
-        await self.repo.session.commit()
+        try:
+            ar_object = await self.repo.create(data)
+            await self.repo.session.commit()
+        except IntegrityError as exc:
+            await self.repo.session.rollback()
+            raise ARObjectConflictError() from exc
         await self.repo.session.refresh(ar_object)
         return ar_object
 
     async def update(self, object_id: UUID, data: ARObjectUpdate) -> ARObject:
         ar_object = await self.get(object_id)
-        ar_object = await self.repo.update(ar_object, data)
-        await self.repo.session.commit()
+        try:
+            ar_object = await self.repo.update(ar_object, data)
+            await self.repo.session.commit()
+        except IntegrityError as exc:
+            await self.repo.session.rollback()
+            raise ARObjectConflictError() from exc
         await self.repo.session.refresh(ar_object)
         return ar_object
 
