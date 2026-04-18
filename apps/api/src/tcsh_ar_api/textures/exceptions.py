@@ -11,12 +11,14 @@ class TextureError(Exception):
 
 
 class InvalidMimeError(TextureError):
-    status_code = 400
+    # 415 Unsupported Media Type — HTTP-semantic match for an out-of-allowlist mime.
+    status_code = 415
     detail = "mime type not allowed"
 
 
 class FileTooLargeError(TextureError):
-    status_code = 400
+    # 413 Payload Too Large — same spirit.
+    status_code = 413
     detail = "file too large"
 
 

@@ -38,6 +38,19 @@ class Settings(BaseSettings):
     # JWKS URL for asymmetric JWT verification (replaces static SUPABASE_JWT_SECRET).
     supabase_jwks_url: str = Field(default="")
 
+    # Texture upload policy. Enforced server-side by this API, and also by the
+    # Supabase bucket's `allowed_mime_types` / `file_size_limit` settings so a
+    # client can't cheat by lying about mime/size in the upload request.
+    texture_allowed_mimes: list[str] = Field(
+        default_factory=lambda: [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/ktx2",
+        ],
+    )
+    texture_max_size_bytes: int = Field(default=10 * 1024 * 1024)  # 10 MB
+
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
 

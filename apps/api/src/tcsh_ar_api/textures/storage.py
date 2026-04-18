@@ -8,6 +8,7 @@ only in this module (never returned to clients).
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import uuid
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from supabase import Client, create_client
 
 from tcsh_ar_api.config import get_settings
 from tcsh_ar_api.textures.exceptions import StorageError
+
+logger = logging.getLogger(__name__)
 
 _BUCKET = "textures"
 _SAFE_FILENAME = re.compile(r"[^a-zA-Z0-9._-]")
@@ -50,7 +53,15 @@ class SupabaseStorage:
         try:
             result = await asyncio.to_thread(_call)
         except Exception as exc:  # pragma: no cover — SDK raises many shapes
-            raise StorageError(str(exc)) from exc
+            # Log at exception level so stack + type land in ops telemetry,
+            # but don't leak the SDK message into the client-facing detail:
+            # upstream errors sometimes include request IDs or paths we'd
+            # rather not expose.
+            logger.exception(
+                "supabase signed upload URL request failed",
+                extra={"storage_path": storage_path},
+            )
+            raise StorageError() from exc
 
         # supabase-py returns snake_case `signed_url` alongside camelCase; take either.
         signed_url = result.get("signed_url") or result.get("signedUrl")
