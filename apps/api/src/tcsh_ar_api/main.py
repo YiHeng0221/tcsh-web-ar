@@ -10,6 +10,7 @@ from tcsh_ar_api.auth.service import get_jwt_service
 from tcsh_ar_api.config import get_settings
 from tcsh_ar_api.db import models as _db_models  # noqa: F401 — register all mappers
 from tcsh_ar_api.health.router import router as health_router
+from tcsh_ar_api.objects.router import router as objects_router
 
 settings = get_settings()
 
@@ -43,3 +44,4 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(anchors_router, prefix="/api")
+app.include_router(objects_router, prefix="/api")
