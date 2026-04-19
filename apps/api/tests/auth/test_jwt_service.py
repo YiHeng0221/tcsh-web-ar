@@ -39,7 +39,10 @@ def _make_token(
 @pytest.fixture
 def service() -> JWTService:
     # URL doesn't need to resolve — all tests below fail before any network.
-    return JWTService("https://example.test/auth/v1/.well-known/jwks.json")
+    return JWTService(
+        "https://example.test/auth/v1/.well-known/jwks.json",
+        issuer="https://example.test/auth/v1",
+    )
 
 
 async def test_rejects_hs256_alg_confusion(service: JWTService) -> None:
@@ -64,6 +67,30 @@ async def test_rejects_missing_kid(service: JWTService) -> None:
 async def test_rejects_malformed_token(service: JWTService) -> None:
     with pytest.raises(InvalidTokenError, match="malformed token header"):
         await service.verify("not-a-jwt-at-all")
+
+
+async def test_malformed_claims_surface_as_invalid_token(
+    service: JWTService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pydantic ValidationError on claims must become 401, not bubble up as 500."""
+
+    async def _fake_find_key(_kid: str) -> dict[str, object]:
+        return {"kid": "k1"}
+
+    def _fake_decode(
+        _token: str,
+        _key: dict[str, object],
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        # `sub` is required by TokenClaims; a payload without it forces
+        # pydantic to raise ValidationError from inside verify().
+        return {"email": "x@example.test"}
+
+    monkeypatch.setattr(service, "_find_key", _fake_find_key)
+    monkeypatch.setattr("tcsh_ar_api.auth.service.jwt.decode", _fake_decode)
+
+    with pytest.raises(InvalidTokenError, match="malformed token claims"):
+        await service.verify(_make_token())
 
 
 async def test_unknown_kid_throttle_prevents_jwks_amplification(
@@ -101,33 +128,45 @@ async def test_unknown_kid_throttle_prevents_jwks_amplification(
     )
 
 
-async def test_fetch_serialized_by_lock(service: JWTService) -> None:
-    """Concurrent verify() calls should not race into simultaneous JWKS fetches."""
+async def test_fetch_serialized_by_real_lock(
+    service: JWTService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent verify() calls must go through the production lock exactly once."""
     in_flight = 0
     peak = 0
 
-    async def fake_fetch(*, force: bool = False) -> dict[str, object]:
-        nonlocal in_flight, peak
-        in_flight += 1
-        peak = max(peak, in_flight)
-        await asyncio.sleep(0.01)
-        in_flight -= 1
-        return {"keys": []}
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
 
-    # Replace only the inner httpx-touching logic; lock is still around it.
-    # Easiest: patch _fetch_jwks itself — the lock lives inside it, so test that
-    # the lock actually serializes.
-    # We can't test the real lock without the inner coroutine respecting it;
-    # instead, assert peak in-flight count is 1 when calling the lock-holding
-    # method via _find_key.
-    async def locked_fetch(*, force: bool = False) -> dict[str, object]:
-        async with service._fetch_lock:
-            return await fake_fetch(force=force)
+        def json(self) -> dict[str, list[dict[str, str]]]:
+            return {"keys": []}
 
-    service._fetch_jwks = locked_fetch  # type: ignore[assignment]
+    class _SlowClient:
+        def __init__(self, *_: object, **__: object) -> None:
+            pass
+
+        async def __aenter__(self) -> _SlowClient:
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get(self, _url: str) -> _FakeResponse:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+            return _FakeResponse()
+
+    # Patch only the httpx client — the real `_fetch_lock` around it must
+    # serialize concurrent callers. If the lock is removed or misplaced, peak
+    # in-flight will exceed 1.
+    monkeypatch.setattr("tcsh_ar_api.auth.service.httpx.AsyncClient", _SlowClient)
 
     await asyncio.gather(
-        *(asyncio.create_task(service._find_key("unknown")) for _ in range(5)),
+        *(asyncio.create_task(service._fetch_jwks(force=True)) for _ in range(5)),
         return_exceptions=True,
     )
     assert peak == 1, f"expected serialized fetch (peak=1), got peak={peak}"

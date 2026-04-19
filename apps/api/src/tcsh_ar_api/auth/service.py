@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 from jose import jwt
 from jose.exceptions import JWTError
+from pydantic import ValidationError
 
 from tcsh_ar_api.auth.exceptions import InvalidTokenError
 from tcsh_ar_api.auth.schemas import TokenClaims
@@ -39,8 +40,15 @@ class JWTService:
     recover from a genuine key rotation, not enough to be a DoS amplifier.
     """
 
-    def __init__(self, jwks_url: str, audience: str = "authenticated") -> None:
+    def __init__(
+        self,
+        jwks_url: str,
+        *,
+        issuer: str,
+        audience: str = "authenticated",
+    ) -> None:
         self._jwks_url = jwks_url
+        self._issuer = issuer
         self._audience = audience
         self._jwks: dict[str, Any] | None = None
         self._fetched_at: float = 0.0
@@ -106,12 +114,23 @@ class JWTService:
                 key,
                 algorithms=list(_ALLOWED_ALGS),
                 audience=self._audience,
-                options={"verify_aud": True, "verify_exp": True},
+                issuer=self._issuer,
+                options={
+                    "verify_aud": True,
+                    "verify_exp": True,
+                    "verify_iss": True,
+                },
             )
         except JWTError as exc:
             raise InvalidTokenError(str(exc)) from exc
 
-        return TokenClaims(**claims)
+        # Pin claims to our schema inside the same failure mode: a malformed
+        # or unexpected payload must surface as 401, not leak as a 500 with
+        # pydantic's stacktrace.
+        try:
+            return TokenClaims(**claims)
+        except ValidationError as exc:
+            raise InvalidTokenError("malformed token claims") from exc
 
 
 @lru_cache(maxsize=1)
@@ -119,7 +138,8 @@ def get_jwt_service() -> JWTService:
     """Returns the process-wide JWTService, configured from settings.
 
     Called eagerly at app startup (see `main.lifespan`) so a missing JWKS
-    URL blows up on boot instead of on the first protected request.
+    URL or Supabase URL blows up on boot instead of on the first
+    protected request.
     """
     settings = get_settings()
     if not settings.supabase_jwks_url:
@@ -127,4 +147,10 @@ def get_jwt_service() -> JWTService:
             "SUPABASE_JWKS_URL is not configured; cannot verify JWTs. "
             "Set it in apps/api/.env."
         )
-    return JWTService(settings.supabase_jwks_url)
+    if not settings.supabase_url:
+        raise RuntimeError(
+            "SUPABASE_URL is not configured; cannot pin JWT issuer. "
+            "Set it in apps/api/.env."
+        )
+    issuer = f"{settings.supabase_url.rstrip('/')}/auth/v1"
+    return JWTService(settings.supabase_jwks_url, issuer=issuer)
