@@ -37,3 +37,8 @@ class ARObjectAnchorFilterError(ARObjectError):
 
     status_code = 404
     detail = "anchor not found"
+
+
+class ARObjectInUseError(ARObjectError):
+    status_code = 409
+    detail = "object is referenced by placements"
