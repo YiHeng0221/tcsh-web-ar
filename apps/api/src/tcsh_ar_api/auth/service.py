@@ -65,9 +65,11 @@ class JWTService:
             # Without this, N coroutines can each pass the outer check in
             # _find_key and each queue up a force=True fetch — the lock
             # serializes them but every one still hits Supabase.
-            if force and self._last_force_refresh is not None and (
-                now - self._last_force_refresh
-            ) < _FORCE_REFRESH_THROTTLE_SECONDS and self._jwks is not None:
+            within_force_throttle = (
+                self._last_force_refresh is not None
+                and (now - self._last_force_refresh) < _FORCE_REFRESH_THROTTLE_SECONDS
+            )
+            if force and within_force_throttle and self._jwks is not None:
                 return self._jwks
             if (
                 not force
