@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -19,7 +19,7 @@ def _get_service(
     return TextureService(storage, settings)
 
 
-def _raise_http(exc: TextureError) -> None:
+def _raise_http(exc: TextureError) -> NoReturn:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
@@ -36,5 +36,3 @@ async def create_upload_url(
         return await svc.create_upload_url(req)
     except TextureError as exc:
         _raise_http(exc)
-    # Unreachable: _raise_http always raises. Return to satisfy the type checker.
-    raise RuntimeError("unreachable")
