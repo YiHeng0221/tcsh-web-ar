@@ -30,11 +30,12 @@ export type PlacementCreate = S["PlacementCreate"];
 export type PlacementUpdate = S["PlacementUpdate"];
 export type Transform = S["Transform"];
 export type UVTransform = S["UVTransform"];
+
+// Geometry — defined once in the backend's `common.schemas` and emitted
+// as unqualified `Vec3` / `Quat` in OpenAPI, so the frontend consumes the
+// same shapes anchors and placements use.
+export type Vec3 = S["Vec3"];
 export type Quat = S["Quat"];
-// Vec3 is inlined by openapi-typescript (it's a trivial shape without validators);
-// define a hand-written matching type rather than reaching through the inlined
-// `position` / `scale` fields of Transform.
-export type Vec3 = { x: number; y: number; z: number };
 
 // Textures
 export type UploadURLRequest = S["UploadURLRequest"];

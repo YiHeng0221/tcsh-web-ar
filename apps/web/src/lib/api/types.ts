@@ -321,19 +321,24 @@ export interface components {
         /**
          * Transform
          * @description 3D pose of the object relative to its anchor's local frame.
+         *
+         *     `scale` components must be strictly positive — mirror / flip is not a
+         *     supported admin move for this artwork (spiral metal mesh textures are
+         *     directional) and negative values are almost always a client bug. This
+         *     matches `UVTransform` so a single rule applies to both transforms.
          */
         Transform: {
-            position: components["schemas"]["tcsh_ar_api__placements__schemas__Vec3"];
+            position: components["schemas"]["Vec3"];
             rotation: components["schemas"]["Quat"];
-            scale: components["schemas"]["tcsh_ar_api__placements__schemas__Vec3"];
+            scale: components["schemas"]["Vec3"];
         };
         /**
          * UVTransform
          * @description 2D adjustment applied to a texture as it maps onto the object's UVs.
          *
          *     `rotate` is in radians (matches three.js Texture.rotation). Mirror /
-         *     flip is not supported here — zero or negative scale would squash or
-         *     invert the UVs and is almost always a client bug.
+         *     flip is not supported — zero or negative scale would squash or invert
+         *     the UVs and is almost always a client bug.
          */
         UVTransform: {
             /**
@@ -392,43 +397,32 @@ export interface components {
             type: string;
         };
         /**
+         * Vec3
+         * @description Right-handed 3D point / vector.
+         *
+         *     NaN / ±Inf rejected at the boundary — they silently pass through
+         *     arithmetic (scale, quaternion magnitude) and leave downstream
+         *     renderers with un-drawable transforms.
+         */
+        Vec3: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+            /** Z */
+            z: number;
+        };
+        /**
          * WorldPose
          * @description Anchor's pose relative to the venue origin, if configured.
          *
-         *     `rotation_quat` is a unit quaternion in (x, y, z, w) order; the same
+         *     `rotation` is a unit quaternion in (x, y, z, w) order; the same
          *     convention used by three.js / R3F on the frontend, so values pass
          *     through without transformation.
          */
         WorldPose: {
-            position: components["schemas"]["tcsh_ar_api__anchors__schemas__Vec3"];
-            /** Rotation Quat */
-            rotation_quat: [
-                number,
-                number,
-                number,
-                number
-            ];
-        };
-        /**
-         * Vec3
-         * @description Right-handed 3D point / vector.
-         */
-        tcsh_ar_api__anchors__schemas__Vec3: {
-            /** X */
-            x: number;
-            /** Y */
-            y: number;
-            /** Z */
-            z: number;
-        };
-        /** Vec3 */
-        tcsh_ar_api__placements__schemas__Vec3: {
-            /** X */
-            x: number;
-            /** Y */
-            y: number;
-            /** Z */
-            z: number;
+            position: components["schemas"]["Vec3"];
+            rotation: components["schemas"]["Quat"];
         };
     };
     responses: never;
