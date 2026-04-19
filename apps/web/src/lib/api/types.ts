@@ -330,6 +330,10 @@ export interface components {
         /**
          * UVTransform
          * @description 2D adjustment applied to a texture as it maps onto the object's UVs.
+         *
+         *     `rotate` is in radians (matches three.js Texture.rotation). Mirror /
+         *     flip is not supported here — zero or negative scale would squash or
+         *     invert the UVs and is almost always a client bug.
          */
         UVTransform: {
             /**
