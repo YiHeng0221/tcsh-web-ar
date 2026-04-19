@@ -170,8 +170,10 @@ MVP schema（名稱暫定，非最終）。使用者與 auth 由 Supabase Auth �
 
 - **`artworks`** — 一個展品一筆。`id`、`slug`、`title`、`model_url`
   （glTF）、`coordinate_system_notes`。
-- **`objects`** — 作品上 200–300 個獨立物件。`id`、`artwork_id`、
-  `label`、`anchor_transform`（在作品局部座標系下的位置/旋轉/縮放）。
+- **`ar_objects`** — 作品上 200–300 個獨立物件。`id`、`label`、
+  `description`。物件本身不帶 transform；位置與姿態交給 `placements`
+  （見下一行），因為同一物件可能在不同 station 有不同 placement。
+  表名用 `ar_objects` 避開 Python `object` / `objects` 模組命名衝突。
 - **`textures`** — 上傳的貼圖資源。`id`、`artwork_id`、`uploader_id`、
   `storage_key`、`width`、`height`、`mime`、`created_at`。
 - **`placements`** — 將貼圖跟物件連結起來加上 UV transform。`id`、
