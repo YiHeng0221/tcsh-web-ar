@@ -3,25 +3,19 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-class Vec3(BaseModel):
-    """Right-handed 3D point / vector."""
-
-    x: float
-    y: float
-    z: float
+from tcsh_ar_api.common.schemas import Quat, Vec3
 
 
 class WorldPose(BaseModel):
     """Anchor's pose relative to the venue origin, if configured.
 
-    `rotation_quat` is a unit quaternion in (x, y, z, w) order; the same
+    `rotation` is a unit quaternion in (x, y, z, w) order; the same
     convention used by three.js / R3F on the frontend, so values pass
     through without transformation.
     """
 
     position: Vec3
-    rotation_quat: tuple[float, float, float, float]
+    rotation: Quat
 
 
 class AnchorBase(BaseModel):
