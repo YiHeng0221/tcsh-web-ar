@@ -67,7 +67,24 @@ class SupabaseStorage:
         signed_url = result.get("signed_url") or result.get("signedUrl")
         token = result.get("token")
         if not signed_url or not token:
+            # Leave a debug-level breadcrumb of the actual keys the SDK
+            # returned so future renames (another casing shift, or a new
+            # shape entirely) can be diagnosed from logs without guessing.
+            logger.warning(
+                "supabase signed upload URL response is missing expected keys",
+                extra={
+                    "storage_path": storage_path,
+                    "keys": sorted(result.keys()),
+                },
+            )
             raise StorageError("storage SDK returned an incomplete signed URL")
+        if result.get("signed_url") is None and result.get("signedUrl") is not None:
+            # The fallback path is live; log it once so we can track when
+            # supabase-py drops the snake_case key entirely.
+            logger.debug(
+                "supabase signed upload URL used camelCase fallback (signedUrl)",
+                extra={"storage_path": storage_path},
+            )
         return SignedUpload(upload_url=signed_url, storage_path=storage_path, token=token)
 
 
