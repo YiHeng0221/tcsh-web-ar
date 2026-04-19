@@ -6,18 +6,21 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Vec3(BaseModel):
-    x: float
-    y: float
-    z: float
+    # Reject NaN / ±Inf at the boundary — scale math and the unit-length
+    # check below both silently pass NaN through, leaving downstream R3F
+    # with un-renderable transforms.
+    x: float = Field(..., allow_inf_nan=False)
+    y: float = Field(..., allow_inf_nan=False)
+    z: float = Field(..., allow_inf_nan=False)
 
 
 class Quat(BaseModel):
     """Unit quaternion in (x, y, z, w) order — matches three.js / R3F."""
 
-    x: float
-    y: float
-    z: float
-    w: float
+    x: float = Field(..., allow_inf_nan=False)
+    y: float = Field(..., allow_inf_nan=False)
+    z: float = Field(..., allow_inf_nan=False)
+    w: float = Field(..., allow_inf_nan=False)
 
     @model_validator(mode="after")
     def _must_be_unit_length(self) -> Self:
@@ -47,13 +50,18 @@ class Transform(BaseModel):
 
 
 class UVTransform(BaseModel):
-    """2D adjustment applied to a texture as it maps onto the object's UVs."""
+    """2D adjustment applied to a texture as it maps onto the object's UVs.
 
-    scale_x: float = 1.0
-    scale_y: float = 1.0
-    rotate: float = 0.0
-    offset_x: float = 0.0
-    offset_y: float = 0.0
+    `rotate` is in radians (matches three.js Texture.rotation). Mirror /
+    flip is not supported here — zero or negative scale would squash or
+    invert the UVs and is almost always a client bug.
+    """
+
+    scale_x: float = Field(default=1.0, gt=0.0, allow_inf_nan=False)
+    scale_y: float = Field(default=1.0, gt=0.0, allow_inf_nan=False)
+    rotate: float = Field(default=0.0, allow_inf_nan=False)
+    offset_x: float = Field(default=0.0, allow_inf_nan=False)
+    offset_y: float = Field(default=0.0, allow_inf_nan=False)
 
 
 class PlacementBase(BaseModel):

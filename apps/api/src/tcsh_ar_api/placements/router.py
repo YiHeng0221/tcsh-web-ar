@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, NoReturn
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -22,7 +22,7 @@ def _get_service(db: Annotated[AsyncSession, Depends(get_db)]) -> PlacementServi
     return PlacementService(PlacementRepository(db))
 
 
-def _raise_http(exc: PlacementError) -> None:
+def _raise_http(exc: PlacementError) -> NoReturn:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
