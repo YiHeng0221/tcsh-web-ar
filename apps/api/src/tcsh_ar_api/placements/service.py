@@ -69,8 +69,17 @@ class PlacementService:
 
     async def delete(self, placement_id: UUID) -> None:
         placement = await self.get(placement_id)
-        await self.repo.delete(placement)
-        await self.repo.session.commit()
+        try:
+            await self.repo.delete(placement)
+            await self.repo.session.commit()
+        except IntegrityError:
+            # placements is a leaf today (no FK references it) so this branch
+            # is purely defensive — if a future audit / history table starts
+            # FK-referencing placements, the rollback + re-raise keeps the
+            # session clean and surfaces the failure as 500 rather than
+            # leaving an aborted transaction and a less helpful trace.
+            await self.repo.session.rollback()
+            raise
 
 
 def _sqlstate(exc: IntegrityError) -> str | None:
