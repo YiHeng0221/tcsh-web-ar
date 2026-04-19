@@ -84,7 +84,11 @@ async def test_malformed_claims_surface_as_invalid_token(
     ) -> dict[str, object]:
         # `sub` is required by TokenClaims; a payload without it forces
         # pydantic to raise ValidationError from inside verify().
-        return {"email": "x@example.test"}
+        return {
+            "email": "x@example.test",
+            "aud": "authenticated",
+            "exp": 9999999999,
+        }
 
     monkeypatch.setattr(service, "_find_key", _fake_find_key)
     monkeypatch.setattr("tcsh_ar_api.auth.service.jwt.decode", _fake_decode)
@@ -93,38 +97,54 @@ async def test_malformed_claims_surface_as_invalid_token(
         await service.verify(_make_token())
 
 
-async def test_unknown_kid_throttle_prevents_jwks_amplification(
+async def test_parallel_unknown_kids_share_one_force_refresh(
     service: JWTService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two quick hits with an unknown `kid` should force-refresh JWKS at most once."""
-    import time as _time
+    """Concurrent unknown-kid verify() calls must collapse into a single JWKS force-refresh.
 
-    force_refresh_calls: list[bool] = []
+    Regression for a race in the previous implementation: the throttle check
+    lived in _find_key outside _fetch_lock, so N coroutines could each pass
+    the check and each issue a force=True fetch — the lock serialized them
+    but every one still hit upstream.
+    """
+    fetch_count = 0
 
-    async def fake_fetch(*, force: bool = False) -> dict[str, object]:
-        force_refresh_calls.append(force)
-        # Mimic what the real fetch mutates so throttle state is accurate.
-        service._jwks = {"keys": []}
-        service._fetched_at = _time.monotonic()
-        if force:
-            service._last_force_refresh = _time.monotonic()
-        return {"keys": []}
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
 
-    monkeypatch.setattr(service, "_fetch_jwks", fake_fetch)
+        def json(self) -> dict[str, list[dict[str, str]]]:
+            return {"keys": []}
 
-    token = _make_token(alg="ES256", kid="unknown-kid-xyz")
-    with pytest.raises(InvalidTokenError):
-        await service.verify(token)
-    with pytest.raises(InvalidTokenError):
-        await service.verify(token)
+    class _CountingClient:
+        def __init__(self, *_: object, **__: object) -> None:
+            pass
 
-    # Across both verify calls: exactly one force=True refresh should fire.
-    # The second unknown-kid lookup must be blocked by the throttle and raise
-    # without touching the network again.
-    forces = [f for f in force_refresh_calls if f]
-    assert len(forces) == 1, (
-        f"expected 1 force-refresh across 2 verify calls, got {len(forces)} "
-        f"(all calls: {force_refresh_calls})"
+        async def __aenter__(self) -> _CountingClient:
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get(self, _url: str) -> _FakeResponse:
+            nonlocal fetch_count
+            fetch_count += 1
+            await asyncio.sleep(0.01)
+            return _FakeResponse()
+
+    monkeypatch.setattr("tcsh_ar_api.auth.service.httpx.AsyncClient", _CountingClient)
+
+    tokens = [_make_token(kid=f"unknown-{i}") for i in range(5)]
+    results = await asyncio.gather(
+        *(service.verify(t) for t in tokens),
+        return_exceptions=True,
+    )
+
+    assert all(isinstance(r, InvalidTokenError) for r in results)
+    # One warm fetch + exactly one force-refresh = 2 upstream calls, no matter
+    # how many parallel unknown-kid callers piled up.
+    assert fetch_count == 2, (
+        f"expected 2 upstream fetches (warm + single force-refresh), got {fetch_count}"
     )
 
 

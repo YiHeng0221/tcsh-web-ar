@@ -52,12 +52,23 @@ class JWTService:
         self._audience = audience
         self._jwks: dict[str, Any] | None = None
         self._fetched_at: float = 0.0
-        self._last_force_refresh: float = 0.0
+        # `None` means "never force-refreshed" — safer than 0.0 because
+        # time.monotonic()'s origin isn't defined by the spec.
+        self._last_force_refresh: float | None = None
         self._fetch_lock = asyncio.Lock()
 
     async def _fetch_jwks(self, *, force: bool = False) -> dict[str, Any]:
         async with self._fetch_lock:
             now = time.monotonic()
+            # Re-check the throttle window *inside* the lock so concurrent
+            # unknown-kid callers collapse into a single upstream fetch.
+            # Without this, N coroutines can each pass the outer check in
+            # _find_key and each queue up a force=True fetch — the lock
+            # serializes them but every one still hits Supabase.
+            if force and self._last_force_refresh is not None and (
+                now - self._last_force_refresh
+            ) < _FORCE_REFRESH_THROTTLE_SECONDS and self._jwks is not None:
+                return self._jwks
             if (
                 not force
                 and self._jwks is not None
@@ -71,7 +82,10 @@ class JWTService:
                 self._fetched_at = now
                 if force:
                     self._last_force_refresh = now
-            assert self._jwks is not None
+            if self._jwks is None:
+                # Defensive: response.json() could only return None if the
+                # upstream returned `null`, which isn't a valid JWKS.
+                raise InvalidTokenError("JWKS upstream returned no body")
             return self._jwks
 
     async def _find_key(self, kid: str) -> dict[str, Any]:
@@ -79,11 +93,9 @@ class JWTService:
         for key in jwks.get("keys", []):
             if key.get("kid") == kid:
                 return key  # type: ignore[no-any-return]
-        # Miss. Only force-refresh if we haven't recently — otherwise an
-        # attacker flooding unknown kids could amplify into JWKS fetches.
-        now = time.monotonic()
-        if (now - self._last_force_refresh) < _FORCE_REFRESH_THROTTLE_SECONDS:
-            raise InvalidTokenError(f"no JWKS key matches kid={kid}")
+        # Miss. Try a force-refresh once; the throttle inside _fetch_jwks
+        # guarantees at most one upstream fetch per throttle window even
+        # under parallel unknown-kid load.
         jwks = await self._fetch_jwks(force=True)
         for key in jwks.get("keys", []):
             if key.get("kid") == kid:

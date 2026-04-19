@@ -14,8 +14,11 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Startup validation — fail loudly at boot rather than on first request."""
-    get_jwt_service()  # raises RuntimeError if SUPABASE_JWKS_URL is unset
+    """Startup validation — assert auth settings are present so the first
+    protected request doesn't surface a config error as 500. The JWKS URL
+    itself is fetched lazily on first token verify; boot doesn't network.
+    """
+    get_jwt_service()  # raises RuntimeError if SUPABASE_JWKS_URL / SUPABASE_URL unset
     yield
 
 

@@ -11,10 +11,13 @@ class TokenClaims(BaseModel):
     """
 
     sub: str
+    # `verify_aud=True` / `verify_exp=True` in jwt.decode guarantee these
+    # are present and non-expired before we build this model; narrowing the
+    # types so downstream code doesn't need to paper over theoretical Nones.
+    aud: str
+    exp: int
     email: str | None = None
-    aud: str | None = None
     role: str | None = None  # Supabase RLS role, e.g. "authenticated"
-    exp: int | None = None
     iat: int | None = None
     app_metadata: dict[str, Any] = Field(default_factory=dict)
     user_metadata: dict[str, Any] = Field(default_factory=dict)
