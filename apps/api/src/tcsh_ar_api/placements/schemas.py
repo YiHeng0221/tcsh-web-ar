@@ -4,48 +4,26 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
-class Vec3(BaseModel):
-    # Reject NaN / ±Inf at the boundary — scale math and the unit-length
-    # check below both silently pass NaN through, leaving downstream R3F
-    # with un-renderable transforms.
-    x: float = Field(..., allow_inf_nan=False)
-    y: float = Field(..., allow_inf_nan=False)
-    z: float = Field(..., allow_inf_nan=False)
-
-
-class Quat(BaseModel):
-    """Unit quaternion in (x, y, z, w) order — matches three.js / R3F."""
-
-    x: float = Field(..., allow_inf_nan=False)
-    y: float = Field(..., allow_inf_nan=False)
-    z: float = Field(..., allow_inf_nan=False)
-    w: float = Field(..., allow_inf_nan=False)
-
-    @model_validator(mode="after")
-    def _must_be_unit_length(self) -> Self:
-        magnitude_squared = (
-            self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w
-        )
-        if abs(magnitude_squared - 1.0) > 1e-3:
-            raise ValueError(
-                f"quaternion must be unit-length, got |q|²={magnitude_squared:.4f}. "
-                "Normalize on the client before sending."
-            )
-        return self
+from tcsh_ar_api.common.schemas import Quat, Vec3
 
 
 class Transform(BaseModel):
-    """3D pose of the object relative to its anchor's local frame."""
+    """3D pose of the object relative to its anchor's local frame.
+
+    `scale` components must be strictly positive — mirror / flip is not a
+    supported admin move for this artwork (spiral metal mesh textures are
+    directional) and negative values are almost always a client bug. This
+    matches `UVTransform` so a single rule applies to both transforms.
+    """
 
     position: Vec3
     rotation: Quat
     scale: Vec3
 
     @model_validator(mode="after")
-    def _scale_non_zero(self) -> Self:
-        if self.scale.x == 0 or self.scale.y == 0 or self.scale.z == 0:
-            raise ValueError("scale components must be non-zero")
+    def _scale_positive(self) -> Self:
+        if self.scale.x <= 0 or self.scale.y <= 0 or self.scale.z <= 0:
+            raise ValueError("scale components must be strictly positive")
         return self
 
 
@@ -53,8 +31,8 @@ class UVTransform(BaseModel):
     """2D adjustment applied to a texture as it maps onto the object's UVs.
 
     `rotate` is in radians (matches three.js Texture.rotation). Mirror /
-    flip is not supported here — zero or negative scale would squash or
-    invert the UVs and is almost always a client bug.
+    flip is not supported — zero or negative scale would squash or invert
+    the UVs and is almost always a client bug.
     """
 
     scale_x: float = Field(default=1.0, gt=0.0, allow_inf_nan=False)

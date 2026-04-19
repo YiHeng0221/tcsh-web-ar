@@ -27,3 +27,15 @@ class PlacementDependencyMissingError(PlacementError):
 
     status_code = 422
     detail = "referenced object, anchor, or texture does not exist"
+
+
+class PlacementAnchorFilterError(PlacementError):
+    """`?anchor_id=` refers to an anchor that doesn't exist.
+
+    Separate from `PlacementDependencyMissingError` (which is about the body
+    of a create / update) so the router can tell the two apart: filtering by
+    a bogus UUID is a 404, creating against one is a 422.
+    """
+
+    status_code = 404
+    detail = "anchor not found"

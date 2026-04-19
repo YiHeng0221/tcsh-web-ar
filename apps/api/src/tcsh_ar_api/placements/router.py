@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tcsh_ar_api.anchors.repository import AnchorRepository
 from tcsh_ar_api.auth.dependencies import require_admin
 from tcsh_ar_api.db.session import get_db
 from tcsh_ar_api.placements.exceptions import PlacementError
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/placements", tags=["placements"])
 
 
 def _get_service(db: Annotated[AsyncSession, Depends(get_db)]) -> PlacementService:
-    return PlacementService(PlacementRepository(db))
+    return PlacementService(PlacementRepository(db), AnchorRepository(db))
 
 
 def _raise_http(exc: PlacementError) -> NoReturn:
@@ -34,7 +35,10 @@ async def list_placements(
         Query(description="Filter to placements at the given anchor"),
     ] = None,
 ) -> list[PlacementOut]:
-    placements = await svc.list_all(anchor_id=anchor_id)
+    try:
+        placements = await svc.list_all(anchor_id=anchor_id)
+    except PlacementError as exc:
+        _raise_http(exc)
     return [PlacementOut.model_validate(p) for p in placements]
 
 
