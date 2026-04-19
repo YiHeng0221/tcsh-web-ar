@@ -41,10 +41,16 @@ if [[ ! -s "$TMP_SPEC" ]]; then
     exit 1
 fi
 
-# Shallow JSON sanity check: must start with `{` and have a "paths" key. We
-# avoid requiring `jq` on the dev box by using a Bun/Python-free grep.
+# Shallow JSON sanity check: must start with `{` and contain a "paths"
+# key. We avoid requiring `jq` on the dev box by using a Bun/Python-free
+# grep — not a real parser, but enough to catch `{"detail": "..."}`
+# error envelopes or non-OpenAPI JSON slipping past the empty-file check.
 if ! head -c 1 "$TMP_SPEC" | grep -q '{'; then
     echo "✗ OpenAPI dump does not look like JSON; first byte is not '{'" >&2
+    exit 1
+fi
+if ! grep -q '"paths"' "$TMP_SPEC"; then
+    echo "✗ OpenAPI dump is valid JSON but has no \"paths\" key — likely an error envelope from the FastAPI module" >&2
     exit 1
 fi
 
