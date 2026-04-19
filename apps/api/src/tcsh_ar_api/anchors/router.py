@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, NoReturn
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,7 +18,7 @@ def _get_service(db: Annotated[AsyncSession, Depends(get_db)]) -> AnchorService:
     return AnchorService(AnchorRepository(db))
 
 
-def _raise_http(exc: AnchorError) -> None:
+def _raise_http(exc: AnchorError) -> NoReturn:
     """Convert a domain error into HTTPException using its declared status/detail."""
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

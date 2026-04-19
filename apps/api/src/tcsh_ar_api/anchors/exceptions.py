@@ -18,3 +18,8 @@ class AnchorNotFoundError(AnchorError):
 class AnchorLabelConflictError(AnchorError):
     status_code = 409
     detail = "anchor label already in use"
+
+
+class AnchorInUseError(AnchorError):
+    status_code = 409
+    detail = "anchor is referenced by placements"
