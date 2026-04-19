@@ -16,9 +16,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WEB_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 API_DIR="$(cd "$WEB_DIR/../api" && pwd)"
 OUT_FILE="$WEB_DIR/src/lib/api/types.ts"
-# `mktemp` with no template is the most portable form across GNU/BSD. We
-# add the .json suffix ourselves because mktemp -t differs between platforms.
-TMP_SPEC="$(mktemp)".json
+# Create a real tempfile and rename it with a `.json` suffix in one hop so
+# openapi-typescript recognises the format. The previous form
+# (`$(mktemp)".json`) string-appended `.json` to the returned path, which
+# meant the original mktemp file was left behind on every run — the trap
+# only cleaned up the `.json` twin.
+_TMP_BASE="$(mktemp)"
+TMP_SPEC="${_TMP_BASE}.json"
+mv "$_TMP_BASE" "$TMP_SPEC"
 trap 'rm -f "$TMP_SPEC"' EXIT
 
 echo "→ Dumping OpenAPI spec from apps/api …"
