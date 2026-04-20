@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import {
   allGranted,
@@ -13,7 +13,7 @@ import {
  * Per the Figma (fileKey emJGaE6FrrLbe6083mYrJf, node 4:2) this is the one
  * intentionally light-themed screen in Mode A. The rest of the mode lives
  * in the dark AR palette; A1 is the onboarding moment before the camera
- * takes over.
+ * takes over. See `--color-a1-*` tokens in index.css for the palette.
  */
 export default function A1Permission() {
   const navigate = useNavigate();
@@ -25,6 +25,8 @@ export default function A1Permission() {
 
   async function handleStart() {
     setState("requesting");
+    // requestAllArPermissions must be invoked synchronously from the tap;
+    // the awaited Promise.all lives inside it.
     const result = await requestAllArPermissions();
     if (allGranted(result)) {
       setState("granted");
@@ -42,22 +44,22 @@ export default function A1Permission() {
     <main
       data-mode="a"
       data-screen="a1"
-      className="safe-area relative mx-auto flex min-h-dvh w-full max-w-md flex-col overflow-hidden bg-white text-[#1a1a1a]"
+      className="safe-area relative mx-auto flex min-h-dvh w-full max-w-md flex-col overflow-hidden bg-a1-surface text-a1-ink"
     >
-      <div className="relative h-[36dvh] w-full shrink-0 overflow-hidden bg-[#2a2a2a]">
+      <div className="relative h-[36dvh] w-full shrink-0 overflow-hidden bg-a1-header">
         <GridPattern />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[8rem] bg-gradient-to-b from-transparent to-white" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[8rem] bg-gradient-to-b from-transparent to-a1-surface" />
       </div>
 
       <div className="flex flex-1 flex-col px-5 pt-6">
         <h1 className="text-center text-2xl font-medium">歡迎來到 tcsh 作品</h1>
 
-        <section className="mt-7 rounded-2xl border border-[#eee] bg-white p-6">
+        <section className="mt-7 rounded-2xl border border-a1-hairline bg-a1-surface p-6">
           <p className="text-center text-[2rem] leading-none">📷</p>
           <h2 className="mt-4 text-center text-base font-medium">
             需要以下權限才能開始體驗
           </h2>
-          <ul className="mt-5 space-y-1.5 text-sm text-[#333]">
+          <ul className="mt-5 space-y-1.5 text-sm text-a1-ink-soft">
             <li>✓ &nbsp;相機 — 疊加 AR 貼圖</li>
             <li>✓ &nbsp;方位 — 追蹤手機角度</li>
           </ul>
@@ -80,16 +82,22 @@ export default function A1Permission() {
           )}
         </section>
 
-        <nav className="mt-auto pb-8 text-center text-sm text-[#666]">
-          <Link to="#" className="hover:text-[#1a1a1a]">
+        {/* Footer links are wired up later (instructions page + about modal),
+            so render as disabled spans for now — `<Link to="#">` would push
+            a history entry and scroll the page. */}
+        <nav
+          aria-label="Auxiliary"
+          className="mt-auto pb-8 text-center text-sm text-a1-caption"
+        >
+          <button type="button" disabled className="cursor-not-allowed">
             使用說明
-          </Link>
+          </button>
           <span aria-hidden className="px-3">
             ·
           </span>
-          <Link to="#" className="hover:text-[#1a1a1a]">
+          <button type="button" disabled className="cursor-not-allowed">
             關於
-          </Link>
+          </button>
         </nav>
       </div>
     </main>
@@ -109,7 +117,7 @@ function GridPattern() {
           <path
             d="M 42 0 L 0 0 0 40"
             fill="none"
-            stroke="#555555"
+            stroke="var(--color-a1-grid)"
             strokeWidth="1"
           />
         </pattern>

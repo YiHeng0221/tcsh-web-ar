@@ -7,7 +7,10 @@ export default function A4ARViewing() {
     <main
       data-mode="a"
       data-screen="a4"
-      className="flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-center"
+      // safe-area intentionally on the placeholder so the scaffolding text
+      // doesn't hide under the iOS notch. The #14 implementation swaps in
+      // a fullbleed camera + R3F canvas and drops this class.
+      className="safe-area flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-center"
     >
       <h1 className="text-xl font-semibold">A4 · AR Viewing</h1>
       <p className="text-sm text-muted">

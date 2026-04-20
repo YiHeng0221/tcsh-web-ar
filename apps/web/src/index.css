@@ -21,6 +21,18 @@
   --radius-tile: 0.75rem;
   --radius-card: 1rem;
   --radius-sheet: 1.5rem;
+
+  /* Mode A · A1 onboarding palette — intentionally light, sits outside
+     the dark AR theme used by A2-A6. Registered so a Figma palette tweak
+     (e.g. header band from #2a2a2a to #1f1f1f) is one-line instead of
+     scattered through A1Permission.tsx. */
+  --color-a1-surface: #ffffff;
+  --color-a1-header: #2a2a2a;
+  --color-a1-grid: #555555;
+  --color-a1-ink: #1a1a1a;
+  --color-a1-ink-soft: #333333;
+  --color-a1-caption: #666666;
+  --color-a1-hairline: #eeeeee;
 }
 
 @layer base {
