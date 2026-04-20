@@ -1,7 +1,8 @@
-import { Bounds, Center, OrbitControls, useBounds } from "@react-three/drei";
+import { OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 
 import { ArtworkModel } from "@/lib/3d/ArtworkModel";
 
@@ -13,15 +14,16 @@ import { ArtworkModel } from "@/lib/3d/ArtworkModel";
  * gesture overlay. B3 (#20 search) and B4 (#21 list) land as sub-routes
  * triggered from this toolbar.
  *
- * Camera framing: the artwork's glTF carries its own scale (post-blender
- * export), so hard-coding a camera distance ends up wrong whenever the
- * model is re-exported. drei's <Bounds> computes the model's AABB and
- * fits the camera on first render; the reset button re-runs that fit.
+ * Camera framing lives inside ArtworkModel (`src/lib/3d/`): the model
+ * owns its own recentre + zoom-to-fit so any caller just drops it in.
  */
 export default function B2Viewer() {
   const navigate = useNavigate();
-  const boundsRef = useRef<BoundsApi | null>(null);
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const [hintsVisible, setHintsVisible] = useState(false);
+  // Bumping this key remounts ArtworkModel, which re-runs its recentre +
+  // camera-fit effect. Cheaper than threading a framing API through props.
+  const [fitKey, setFitKey] = useState(0);
 
   useEffect(() => {
     const seen = localStorage.getItem(GESTURE_HINTS_KEY) === "1";
@@ -39,7 +41,7 @@ export default function B2Viewer() {
   }
 
   function resetView() {
-    boundsRef.current?.refresh().reset().fit();
+    setFitKey((n) => n + 1);
   }
 
   return (
@@ -53,9 +55,8 @@ export default function B2Viewer() {
       <div className="relative flex-1">
         <Canvas
           dpr={[1, 2]}
-          // Far plane generous so even large models stay inside the frustum.
-          // fov 40 is comfortable for artwork presentation — not so narrow
-          // that the viewer feels pinched, not so wide that it fish-eyes.
+          // fov 40 reads comfortably for artwork presentation. Camera
+          // position is overridden by ArtworkModel after glTF load.
           camera={{ fov: 40, near: 0.01, far: 10000 }}
           gl={{ antialias: true }}
           className="h-full w-full"
@@ -66,21 +67,13 @@ export default function B2Viewer() {
           <directionalLight position={[-4, 2, -4]} intensity={0.3} />
 
           <Suspense fallback={null}>
-            {/* margin leaves ~15% headroom around the AABB so the model
-                never touches the viewport edge after an auto-fit. */}
-            <Bounds fit clip observe margin={1.15}>
-              <BoundsApiBridge apiRef={boundsRef} />
-              <Center>
-                <ArtworkModel />
-              </Center>
-            </Bounds>
+            <ArtworkModel key={fitKey} />
           </Suspense>
 
-          {/* Distance limits widened so visitors can zoom far out to see the
-              whole piece and far in to inspect mesh detail. The exact
-              model scale is unknown here; tight bounds belong on the
-              <Bounds> fit, not on OrbitControls. */}
+          {/* Distance bounds wide open — ArtworkModel sets the right
+              initial distance; visitors decide how far to push. */}
           <OrbitControls
+            ref={controlsRef}
             makeDefault
             enablePan={false}
             enableDamping
@@ -99,31 +92,6 @@ export default function B2Viewer() {
 }
 
 const GESTURE_HINTS_KEY = "tcsh:mode-b:gesture-hints-seen";
-
-/** Subset of drei's Bounds API we need; full typedef lives inside drei. */
-type BoundsApi = {
-  refresh: (object?: unknown) => BoundsApi;
-  reset: () => BoundsApi;
-  fit: () => BoundsApi;
-};
-
-/**
- * Pulls the <Bounds> API out of the R3F context and exposes it to the
- * DOM layer (the toolbar's reset button) via a parent-owned ref. Renders
- * nothing. Lives inside <Canvas> / <Bounds> because useBounds() is tied
- * to the R3F render root.
- */
-function BoundsApiBridge({
-  apiRef,
-}: {
-  apiRef: React.MutableRefObject<BoundsApi | null>;
-}) {
-  const bounds = useBounds();
-  useEffect(() => {
-    apiRef.current = bounds as unknown as BoundsApi;
-  }, [bounds, apiRef]);
-  return null;
-}
 
 // ── Top bar ────────────────────────────────────────────────────────────
 function TopBar({ onBack }: { onBack: () => void }) {
