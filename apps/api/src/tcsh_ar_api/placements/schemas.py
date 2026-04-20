@@ -22,6 +22,10 @@ class Transform(BaseModel):
 
     @model_validator(mode="after")
     def _scale_positive(self) -> Self:
+        # NaN comparisons return False, so a naive `<= 0` check would admit
+        # NaN scale. We rely on Vec3's `allow_inf_nan=False` to reject NaN
+        # upstream — if Vec3 ever relaxes that, tighten this check too
+        # (e.g., `not (x > 0 and y > 0 and z > 0)`).
         if self.scale.x <= 0 or self.scale.y <= 0 or self.scale.z <= 0:
             raise ValueError("scale components must be strictly positive")
         return self
@@ -61,6 +65,12 @@ class PlacementUpdate(BaseModel):
     placement across anchors or to a different object is destructive
     enough that it should go through DELETE + POST. Keeps the audit trail
     readable.
+
+    Null semantics (Pydantic v2 + `exclude_unset=True` in the repository):
+    - field absent from body → keep current value
+    - field present as `null` → clear the value (only meaningful for
+      `texture_id`, which is nullable; null on `transform` /
+      `uv_transform` is a client bug since those aren't nullable here)
     """
 
     texture_id: UUID | None = None

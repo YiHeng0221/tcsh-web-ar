@@ -8,6 +8,7 @@ from tcsh_ar_api.placements.exceptions import (
     PlacementAnchorFilterError,
     PlacementConflictError,
     PlacementDependencyMissingError,
+    PlacementInUseError,
     PlacementNotFoundError,
 )
 from tcsh_ar_api.placements.models import Placement
@@ -72,13 +73,15 @@ class PlacementService:
         try:
             await self.repo.delete(placement)
             await self.repo.session.commit()
-        except IntegrityError:
-            # placements is a leaf today (no FK references it) so this branch
-            # is purely defensive — if a future audit / history table starts
-            # FK-referencing placements, the rollback + re-raise keeps the
-            # session clean and surfaces the failure as 500 rather than
-            # leaving an aborted transaction and a less helpful trace.
+        except IntegrityError as exc:
             await self.repo.session.rollback()
+            # placements is a leaf today, so this is forward-looking. When
+            # the first table FK-references placements.id, a delete hitting
+            # 23503 should land as 409 via the domain exception — not leak
+            # raw asyncpg IntegrityError past the router's PlacementError
+            # handler (which would surface as 500).
+            if _sqlstate(exc) == _SQLSTATE_FOREIGN_KEY_VIOLATION:
+                raise PlacementInUseError() from exc
             raise
 
 

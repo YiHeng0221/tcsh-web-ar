@@ -39,3 +39,17 @@ class PlacementAnchorFilterError(PlacementError):
 
     status_code = 404
     detail = "anchor not found"
+
+
+class PlacementInUseError(PlacementError):
+    """Placement is FK-referenced by another row and can't be deleted.
+
+    No table references placements today (placements is a leaf), so this is
+    forward-looking: the first audit / history / event log table that FKs
+    placements.id will trip this on delete. Keeping it in the domain
+    vocabulary now means the router maps it to 409 rather than letting a
+    raw asyncpg IntegrityError leak as 500.
+    """
+
+    status_code = 409
+    detail = "placement is referenced by other records"
