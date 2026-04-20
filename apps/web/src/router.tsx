@@ -4,7 +4,7 @@ import A1Permission from "@/modes/a/screens/A1Permission";
 import A2StationPicker from "@/modes/a/screens/A2StationPicker";
 import A3QRScan from "@/modes/a/screens/A3QRScan";
 import A4ARViewing from "@/modes/a/screens/A4ARViewing";
-import ModeBRoot from "@/modes/b/ModeBRoot";
+import B2Viewer from "@/modes/b/screens/B2Viewer";
 import ModeCRoot from "@/modes/c/ModeCRoot";
 import Landing from "@/pages/Landing";
 import NotFound from "@/pages/NotFound";
@@ -21,9 +21,9 @@ export const router = createBrowserRouter([
   { path: "/a/scan/:stationId", element: <A3QRScan /> },
   { path: "/a/view/:stationId", element: <A4ARViewing /> },
 
-  // Mode B / Mode C shells still on their own. Internal routing lands
-  // with the mode-specific issues (#18–#22, #23–#29).
-  { path: "/b", element: <ModeBRoot /> },
+  // Mode B · 3D viewer. B1 loading (#18), B3 search (#20), B4 list (#21)
+  // land as sub-routes of /b; right now /b = B2 viewer directly.
+  { path: "/b", element: <B2Viewer /> },
   { path: "/_studio/:token", element: <ModeCRoot /> },
   { path: "/_studio", element: <Navigate to="/" replace /> },
 
