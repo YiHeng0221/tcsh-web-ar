@@ -22,10 +22,10 @@ export default function Landing() {
   });
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-8 px-6 py-12">
+    <main className="safe-area mx-auto flex min-h-dvh w-full max-w-xl flex-col gap-8 px-6 py-12">
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">tcsh-web-ar</h1>
-        <p className="text-sm text-[color:var(--color-muted)]">
+        <p className="text-sm text-muted">
           Scaffold landing — pick a mode to open the placeholder. Real entry
           points ship behind `/` (Mode A), handheld share links (Mode B), and
           the obfuscated studio path (Mode C).
@@ -51,18 +51,14 @@ export default function Landing() {
         />
       </section>
 
-      <footer className="mt-auto rounded-[var(--radius-card)] border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-4 text-xs">
+      <footer className="mt-auto rounded-card border border-border bg-surface p-4 text-xs">
         <p className="font-medium">API health check</p>
-        {isLoading && (
-          <p className="text-[color:var(--color-muted)]">checking…</p>
-        )}
+        {isLoading && <p className="text-muted">checking…</p>}
         {error && (
-          <p className="text-[color:var(--color-danger)]">
-            unreachable: {String(error)}
-          </p>
+          <p className="text-danger">unreachable: {String(error)}</p>
         )}
         {data && (
-          <p className="text-[color:var(--color-success)]">
+          <p className="text-success">
             {data.status} · v{data.version}
           </p>
         )}
@@ -82,17 +78,16 @@ function ModeCard({
   subtitle: string;
   accent?: boolean;
 }) {
+  const border = accent
+    ? "border-accent hover:bg-border"
+    : "border-border hover:border-fg";
   return (
     <Link
       to={to}
-      className={
-        accent
-          ? "block rounded-[var(--radius-card)] border border-[color:var(--color-accent)] bg-[color:var(--color-surface)] p-5 transition-colors hover:bg-[color:var(--color-border)]"
-          : "block rounded-[var(--radius-card)] border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-5 transition-colors hover:border-[color:var(--color-fg)]"
-      }
+      className={`block rounded-card border bg-surface p-5 transition-colors ${border}`}
     >
       <h2 className="text-lg font-medium">{title}</h2>
-      <p className="text-sm text-[color:var(--color-muted)]">{subtitle}</p>
+      <p className="text-sm text-muted">{subtitle}</p>
     </Link>
   );
 }

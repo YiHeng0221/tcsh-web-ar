@@ -9,17 +9,14 @@ export default function ModeBRoot() {
   return (
     <div
       data-mode="b"
-      className="flex min-h-screen flex-col items-center justify-center gap-6 px-6"
+      className="safe-area flex min-h-dvh flex-col items-center justify-center gap-6 px-6"
     >
       <h1 className="text-2xl font-semibold">Mode B · 3D Viewer</h1>
-      <p className="max-w-md text-center text-sm text-[color:var(--color-muted)]">
+      <p className="max-w-md text-center text-sm text-muted">
         Handheld 3D viewer. B1–B4 screens land in issues #18–#21, responsive
         layouts in #22.
       </p>
-      <Link
-        to="/"
-        className="text-sm text-[color:var(--color-muted)] hover:text-[color:var(--color-fg)]"
-      >
+      <Link to="/" className="text-sm text-muted hover:text-fg">
         ← Back to landing
       </Link>
     </div>
