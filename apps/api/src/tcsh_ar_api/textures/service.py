@@ -1,4 +1,5 @@
 import base64
+import binascii
 import json
 import logging
 import time
@@ -59,6 +60,10 @@ def _parse_token_exp(token: str) -> int:
         padded = payload_b64 + "=" * (-len(payload_b64) % 4)
         payload = json.loads(base64.urlsafe_b64decode(padded))
         return int(payload["exp"])
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, binascii.Error):
+        # binascii.Error covers malformed base64 in the payload segment; the
+        # other three cover wrong JWT shape, missing `exp`, or non-numeric
+        # exp. Any parse failure should land on the Supabase-default
+        # fallback rather than surfacing as a 500.
         logger.warning("could not parse exp from storage token, using fallback")
         return int(time.time()) + _FALLBACK_EXPIRES_IN_SECONDS
