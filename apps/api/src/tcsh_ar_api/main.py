@@ -44,8 +44,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Both the dev proxy (vite.config.ts) and production nginx
+# (apps/web/nginx.conf) strip the `/api/` prefix before forwarding.
+# The domain routers therefore mount at `/<domain>` on the FastAPI side;
+# clients and proxies see `/api/<domain>`. Health is unprefixed so it
+# can be reached directly by container health checks.
 app.include_router(health_router)
-app.include_router(anchors_router, prefix="/api")
-app.include_router(objects_router, prefix="/api")
-app.include_router(placements_router, prefix="/api")
-app.include_router(textures_router, prefix="/api")
+app.include_router(anchors_router)
+app.include_router(objects_router)
+app.include_router(placements_router)
+app.include_router(textures_router)
