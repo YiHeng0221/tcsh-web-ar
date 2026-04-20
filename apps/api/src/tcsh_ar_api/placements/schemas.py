@@ -63,7 +63,7 @@ class PlacementUpdate(BaseModel):
     readable.
     """
 
-    texture_id: UUID | None = Field(default=None)
+    texture_id: UUID | None = None
     transform: Transform | None = None
     uv_transform: UVTransform | None = None
 

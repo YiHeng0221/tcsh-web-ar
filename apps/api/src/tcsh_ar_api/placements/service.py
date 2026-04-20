@@ -83,6 +83,10 @@ class PlacementService:
 
 
 def _sqlstate(exc: IntegrityError) -> str | None:
+    # asyncpg-specific: IntegrityConstraintViolationError exposes `sqlstate`
+    # on the wrapped `orig`. psycopg / psycopg2 would use `pgcode` instead,
+    # so this helper silently falls back to 500 if the driver ever changes.
+    # Sibling domains (anchors / objects) mirror this assumption.
     return getattr(getattr(exc, "orig", None), "sqlstate", None)
 
 

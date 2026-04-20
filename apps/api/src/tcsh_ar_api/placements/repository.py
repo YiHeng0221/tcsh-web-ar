@@ -17,7 +17,10 @@ class PlacementRepository:
         stmt = select(Placement)
         if anchor_id is not None:
             stmt = stmt.where(Placement.anchor_id == anchor_id)
-        stmt = stmt.order_by(Placement.created_at)
+        # id as tie-breaker: bulk-imported rows frequently share created_at
+        # at the microsecond level; without a stable secondary key, clients
+        # paging or diffing would see rows shuffle between requests.
+        stmt = stmt.order_by(Placement.created_at, Placement.id)
         result = await self.session.execute(stmt)
         return list(result.scalars())
 
