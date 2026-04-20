@@ -24,8 +24,11 @@ class TextureService:
         self._settings = settings
 
     async def create_upload_url(self, req: UploadURLRequest) -> UploadURLResponse:
-        allowed_mimes = set(self._settings.texture_allowed_mimes)
-        if req.mime not in allowed_mimes:
+        # RFC 6838 defines mime type / subtype tokens as case-insensitive;
+        # compare lowercased so IMAGE/JPEG or image/PNG don't false-reject.
+        allowed_mimes = {m.lower() for m in self._settings.texture_allowed_mimes}
+        requested_mime = req.mime.lower()
+        if requested_mime not in allowed_mimes:
             raise InvalidMimeError(
                 f"mime '{req.mime}' not allowed; allowed: {sorted(allowed_mimes)}"
             )

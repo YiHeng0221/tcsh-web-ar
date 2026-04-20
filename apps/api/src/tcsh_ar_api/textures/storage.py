@@ -77,7 +77,10 @@ class SupabaseStorage:
                     "keys": sorted(result.keys()),
                 },
             )
-            raise StorageError("storage SDK returned an incomplete signed URL")
+            # Client gets the default "storage backend error" detail so we
+            # don't leak SDK-shape language across the API boundary; the
+            # warning above carries the actual keys for ops triage.
+            raise StorageError()
         if result.get("signed_url") is None and result.get("signedUrl") is not None:
             # The fallback path is live; log it once so we can track when
             # supabase-py drops the snake_case key entirely.
