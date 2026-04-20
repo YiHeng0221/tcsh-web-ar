@@ -24,11 +24,18 @@ export default function A2StationPicker() {
     error,
   } = useQuery({
     queryKey: ["anchors"],
-    queryFn: () => apiGet<Anchor[]>("/anchors"),
+    queryFn: ({ signal }) => apiGet<Anchor[]>("/anchors", { signal }),
   });
 
   const stations = anchors ?? [];
   const primaryCta = stations[0];
+
+  // Deep-link users arrive with history.length === 1, so navigate(-1)
+  // would leave the SPA. Fall back to A1 for that case.
+  function handleBack() {
+    if (window.history.length > 1) navigate(-1);
+    else navigate("/a/permission", { replace: true });
+  }
 
   return (
     <main
@@ -39,7 +46,7 @@ export default function A2StationPicker() {
       <header className="flex h-12 items-center px-3">
         <button
           type="button"
-          onClick={() => navigate(-1)}
+          onClick={handleBack}
           className="flex h-10 w-10 items-center justify-center text-[22px] leading-none"
           aria-label="返回"
         >
@@ -76,6 +83,7 @@ export default function A2StationPicker() {
   );
 }
 
+// ── Map constants ─────────────────────────────────────────────────────────
 const MAP_SIZE = 280;
 const CENTER = MAP_SIZE / 2;
 // Four concentric dashed rings from the Figma; stations sit on the
@@ -83,6 +91,24 @@ const CENTER = MAP_SIZE / 2;
 const RINGS = [140, 110, 80, 50];
 const STATION_RING_R = RINGS[1] - 8;
 const DOT_RADIUS = 8;
+
+// ── Badge helpers (module scope so they don't reallocate per render) ─────
+const CIRCLED_LETTERS = ["ⓐ", "ⓑ", "ⓒ", "ⓓ", "ⓔ", "ⓕ", "ⓖ", "ⓗ"];
+// Match a single trailing A–Z letter (case-insensitive). Anchors seeded as
+// "Station A" / "station b" both map cleanly; anything else falls back to
+// the index-based circled letter.
+const TRAILING_LETTER = /([A-Za-z])\s*$/;
+
+/** Circled-letter badge (ⓐ ⓑ ...) matching the Figma. */
+function stationBadge(label: string, index: number): string {
+  const match = TRAILING_LETTER.exec(label);
+  if (match) {
+    const letter = match[1].toUpperCase();
+    const code = letter.charCodeAt(0) - "A".charCodeAt(0);
+    if (code >= 0 && code < CIRCLED_LETTERS.length) return CIRCLED_LETTERS[code];
+  }
+  return CIRCLED_LETTERS[index] ?? label;
+}
 
 function StationMap({
   stations,
@@ -143,31 +169,44 @@ function StationMap({
         const angle = (i * 2 * Math.PI) / stations.length - Math.PI / 2;
         const cx = CENTER + STATION_RING_R * Math.cos(angle);
         const cy = CENTER + STATION_RING_R * Math.sin(angle);
-        const badgeLabel = stationBadge(s.label, i);
+        const badge = stationBadge(s.label, i);
+        // SVG <a> with an explicit href gives us Enter/Space activation,
+        // VoiceOver button semantics, and right-click "open in new tab"
+        // for free. The onClick preventDefault + onPick call keeps
+        // navigation inside the SPA; the href stays as a real link so
+        // keyboard / screen-reader flows don't need extra handlers.
+        const scanHref = `/a/scan/${s.id}`;
         return (
-          <g
+          <a
             key={s.id}
-            className="cursor-pointer"
-            onClick={() => onPick(s.id)}
-            role="button"
-            tabIndex={0}
+            href={scanHref}
             aria-label={s.label}
+            onClick={(e) => {
+              if (
+                e.defaultPrevented ||
+                e.button !== 0 ||
+                e.metaKey ||
+                e.ctrlKey ||
+                e.shiftKey ||
+                e.altKey
+              ) {
+                return;
+              }
+              e.preventDefault();
+              onPick(s.id);
+            }}
+            className="cursor-pointer focus:outline-none focus-visible:[&_circle]:stroke-a1-ink focus-visible:[&_circle]:stroke-2"
           >
-            <circle
-              cx={cx}
-              cy={cy}
-              r={DOT_RADIUS}
-              fill="var(--color-a1-ink)"
-            />
+            <circle cx={cx} cy={cy} r={DOT_RADIUS} fill="var(--color-a1-ink)" />
             <text
               x={cx}
               y={cy + DOT_RADIUS + 14}
               textAnchor="middle"
               className="pointer-events-none select-none fill-[var(--color-a1-ink)] text-[11px]"
             >
-              {badgeLabel}
+              {badge}
             </text>
-          </g>
+          </a>
         );
       })}
     </svg>
@@ -180,19 +219,4 @@ function StateFrame({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
-}
-
-/** Circled-letter badge (ⓐ ⓑ ...) matching the Figma, falling back to
- *  the raw label when the anchor isn't one of A/B/C/D/E. */
-function stationBadge(label: string, index: number): string {
-  const CIRCLED = ["ⓐ", "ⓑ", "ⓒ", "ⓓ", "ⓔ", "ⓕ", "ⓖ", "ⓗ"];
-  // Anchors seeded as "Station A" / "Station B" etc — take the trailing
-  // letter. If the label doesn't end in a single A-Z, fall back to
-  // index-based circled letter.
-  const trailingLetter = /([A-Z])\s*$/.exec(label)?.[1];
-  if (trailingLetter) {
-    const code = trailingLetter.charCodeAt(0) - "A".charCodeAt(0);
-    if (code >= 0 && code < CIRCLED.length) return CIRCLED[code];
-  }
-  return CIRCLED[index] ?? label;
 }
