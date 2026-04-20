@@ -14,7 +14,10 @@ class TokenClaims(BaseModel):
     # `verify_aud=True` / `verify_exp=True` in jwt.decode guarantee these
     # are present and non-expired before we build this model; narrowing the
     # types so downstream code doesn't need to paper over theoretical Nones.
-    aud: str
+    # RFC 7519 §4.1.3 allows `aud` to be a string or a list of strings;
+    # Supabase currently sends a string, but accept both so a provider change
+    # surfaces as 401 validation via the normal path, not a 500 here.
+    aud: str | list[str]
     exp: int
     email: str | None = None
     role: str | None = None  # Supabase RLS role, e.g. "authenticated"
