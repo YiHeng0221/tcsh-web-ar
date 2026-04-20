@@ -176,9 +176,12 @@ MVP schema（名稱暫定，非最終）。使用者與 auth 由 Supabase Auth �
   表名用 `ar_objects` 避開 Python `object` / `objects` 模組命名衝突。
 - **`textures`** — 上傳的貼圖資源。`id`、`artwork_id`、`uploader_id`、
   `storage_key`、`width`、`height`、`mime`、`created_at`。
-- **`placements`** — 將貼圖跟物件連結起來加上 UV transform。`id`、
-  `object_id`、`texture_id`、`uv_offset`、`uv_scale`、`uv_rotation`、
-  `updated_by`、`updated_at`。
+- **`placements`** — 把一個物件擺在一個 anchor 上、可選地貼上貼圖。
+  `id`、`ar_object_id`、`anchor_id`、`texture_id`（nullable）、
+  `transform` JSONB（position / rotation 四元數 / scale）、
+  `uv_transform` JSONB（scale_x / scale_y / rotate / offset_x / offset_y，
+  nullable）、`created_at`、`updated_at`。
+  `(ar_object_id, anchor_id)` unique——同一物件在同一 anchor 只能有一筆。
 - **`markers`** — 現場影像 marker 給 Mode A 追蹤用。`id`、
   `artwork_id`、`marker_image_url`、`pose_in_artwork_frame`。
 
