@@ -1,15 +1,54 @@
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
+@import "tailwindcss";
+
+@theme {
+  /* Design tokens sourced from docs/claude-design-prompts.md and the Mode A
+     Figma (fileKey emJGaE6FrrLbe6083mYrJf). Cyan is the AR highlight accent;
+     the dark surface matches the on-site mode's black-background palette. */
+  --color-bg: #0a0a0a;
+  --color-surface: #141414;
+  --color-border: #2a2a2a;
+  --color-fg: #fafafa;
+  --color-muted: #8a8a8a;
+  --color-accent: #00e5ff;
+  --color-accent-strong: #00b8d4;
+  --color-danger: #ef4444;
+  --color-success: #10b981;
+
+  --font-sans: system-ui, -apple-system, "Helvetica Neue", sans-serif;
+
+  --radius-tile: 0.75rem;
+  --radius-card: 1rem;
+  --radius-sheet: 1.5rem;
 }
 
-html,
-body,
-#root {
-  margin: 0;
-  padding: 0;
-  min-height: 100%;
-  background: #fafafa;
-  color: #111;
+@layer base {
+  html,
+  body,
+  #root {
+    margin: 0;
+    padding: 0;
+    min-height: 100%;
+  }
+
+  body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    /* iOS safe area defaults — mode screens override per design. */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  /* AR / 3D views want no tap highlights and no text selection by default. */
+  [data-mode="a"],
+  [data-mode="b"] {
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
 }
