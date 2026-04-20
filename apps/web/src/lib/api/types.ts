@@ -297,6 +297,12 @@ export interface components {
          *     placement across anchors or to a different object is destructive
          *     enough that it should go through DELETE + POST. Keeps the audit trail
          *     readable.
+         *
+         *     Null semantics (Pydantic v2 + `exclude_unset=True` in the repository):
+         *     - field absent from body → keep current value
+         *     - field present as `null` → clear the value (only meaningful for
+         *       `texture_id`, which is nullable; null on `transform` /
+         *       `uv_transform` is a client bug since those aren't nullable here)
          */
         PlacementUpdate: {
             /** Texture Id */
