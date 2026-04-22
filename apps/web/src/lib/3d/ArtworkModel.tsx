@@ -1,15 +1,22 @@
 import { useGLTF } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 import { useLayoutEffect, useMemo } from "react";
-import { Box3, Vector3 } from "three";
+import type { Material, Object3D, Texture } from "three";
+import { Box3, Mesh, Vector3 } from "three";
 import type { GLTF } from "three-stdlib";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 
 import { ARTWORK_MODEL_URL } from "./artworkUrl";
 
-// Pre-warm the fetch so the first navigation to B2 hits a ready cache.
-// drei's useGLTF caches on the url, so this is effectively memoised.
-useGLTF.preload(ARTWORK_MODEL_URL);
+/**
+ * Queue the glTF fetch. Called by the mode-B screen component on mount
+ * — intentionally not a module top-level side effect, so importing this
+ * module (e.g., because react-router's code-split chunk gets pre-parsed)
+ * doesn't itself trigger a ~10 MB download before the user visits Mode B.
+ */
+export function preloadArtwork(): void {
+  useGLTF.preload(ARTWORK_MODEL_URL);
+}
 
 type Props = {
   /** Multiplier on the longest bbox axis when placing the camera. 1 = snug,
@@ -18,25 +25,41 @@ type Props = {
 };
 
 /**
- * Loads, centers, and frames the primary artwork glTF.
+ * Loads, centres, and frames the primary artwork glTF.
  *
  * glTF exporters often anchor the model's pivot at a corner or the base
  * rather than the geometric centre, which made OrbitControls orbit around
  * a point in front of the artwork. We recompute the AABB after load,
- * shift the scene so the centre lands at the world origin, then pull the
- * camera back along +Z to frame the whole piece and pin the controls
- * target to the origin. One pass; no repeated work, no viewport resize
- * observer needed (the fit is independent of canvas size once the camera
- * distance is right).
+ * shift the cloned scene so the centre lands at the world origin, then
+ * pull the camera back along +Z to frame the whole piece and pin the
+ * controls target to the origin.
+ *
+ * On unmount we dispose the cloned geometry / materials / textures;
+ * drei's `useGLTF` cache still owns the raw glTF buffers, so only the
+ * per-mount copy is released. Without this a user bouncing in and out
+ * of `/b` leaks GPU memory (frontend.md: "Dispose geometry/material/
+ * texture on unmount — else GPU leak").
  */
 export function ArtworkModel({ framing = 1.8 }: Props = {}) {
   // drei's useGLTF overload returns `(GLTF & ObjectMap) | (GLTF & ObjectMap)[]`
   // so narrow to the single-URL shape — TS can't prove the union itself.
   const gltf = useGLTF(ARTWORK_MODEL_URL) as GLTF;
 
-  // Clone so remount / HMR re-runs the framing effect against a fresh
-  // scene graph (modifying gltf.scene directly mutates drei's cache).
-  const scene = useMemo(() => gltf.scene.clone(), [gltf.scene]);
+  // Deep-clone the scene graph so HMR / remount works on a fresh subtree
+  // without mutating drei's shared cache. `clone(true)` walks children;
+  // we still need to deep-clone each mesh's geometry / material so
+  // Mode A A4 (when it eventually uses the same model) can tint or
+  // modify materials without disturbing this mount's copy.
+  const scene = useMemo<Object3D>(() => {
+    const cloned = gltf.scene.clone(true);
+    cloned.traverse((node) => {
+      if (node instanceof Mesh) {
+        node.geometry = node.geometry.clone();
+        node.material = cloneMaterial(node.material);
+      }
+    });
+    return cloned;
+  }, [gltf.scene]);
 
   const camera = useThree((s) => s.camera);
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
@@ -68,5 +91,58 @@ export function ArtworkModel({ framing = 1.8 }: Props = {}) {
     }
   }, [scene, camera, controls, framing]);
 
+  // Dispose the cloned GPU resources when the component unmounts.
+  // Runs once per mount (empty deps); by that time `scene` is stable
+  // for this lifetime because `useMemo` above only reruns when the
+  // source glTF changes (which coincides with a remount anyway).
+  useLayoutEffect(() => {
+    return () => {
+      scene.traverse((node) => {
+        if (node instanceof Mesh) {
+          node.geometry?.dispose();
+          disposeMaterial(node.material);
+        }
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return <primitive object={scene} />;
+}
+
+/**
+ * Shallow-clone a material (or every material in an array). The cloned
+ * material still shares texture references with the source — we leave
+ * those to drei's useGLTF cache and only dispose material / geometry
+ * we own.
+ */
+function cloneMaterial(material: Material | Material[]): Material | Material[] {
+  if (Array.isArray(material)) return material.map((m) => m.clone());
+  return material.clone();
+}
+
+function disposeMaterial(material: Material | Material[]): void {
+  const dispose = (m: Material): void => {
+    // Dispose textures the material references. Same caveat: drei owns
+    // the source textures via its cache and will dispose them when the
+    // cached glTF entry is evicted, so disposing here only hurts if we
+    // share a texture with the original — which we don't, because
+    // `m` is a clone.
+    for (const key in m) {
+      const value = (m as unknown as Record<string, unknown>)[key];
+      if (isTexture(value)) value.dispose();
+    }
+    m.dispose();
+  };
+  if (Array.isArray(material)) material.forEach(dispose);
+  else dispose(material);
+}
+
+function isTexture(value: unknown): value is Texture {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    // Texture has a `.isTexture` discriminator from three.js.
+    (value as { isTexture?: boolean }).isTexture === true
+  );
 }

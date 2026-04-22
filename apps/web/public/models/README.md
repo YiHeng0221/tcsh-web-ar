@@ -7,15 +7,16 @@ bundle.").
 
 ## Expected files
 
-| File | Source | Size |
-| ---- | ------ | ---- |
-| `TaiJai.glb` | Artist hand-off via Discord; the full textured spiral-mesh artwork | ~10 MB |
+| File | Size | Notes |
+| ---- | ---- | ----- |
+| `TaiJai.glb` | ~10 MB | Full textured spiral-mesh artwork |
 
 ## Getting the files (dev)
 
-Until the upload script lands (#27 Mode C · C4), pull from the shared
-Discord channel's `#作品資產` pins or ask @allen for the current version.
-Drop the file here and Vite will serve it at `/models/TaiJai.glb`.
+Hand-off URLs and the current artist contact live in the team's
+internal docs — ask a maintainer. Drop the file here and Vite will
+serve it at `/models/<name>`. #27 (Mode C · C4 upload) replaces the
+manual hand-off with a real pipeline.
 
 ## Production
 

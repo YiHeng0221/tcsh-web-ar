@@ -2,9 +2,9 @@ import { OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 
-import { ArtworkModel } from "@/lib/3d/ArtworkModel";
+import { ArtworkModel, preloadArtwork } from "@/lib/3d/ArtworkModel";
+import { ModelErrorBoundary } from "@/lib/3d/ModelErrorBoundary";
 
 /**
  * B2 · 3D Viewer (issue #19).
@@ -19,11 +19,17 @@ import { ArtworkModel } from "@/lib/3d/ArtworkModel";
  */
 export default function B2Viewer() {
   const navigate = useNavigate();
-  const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const [hintsVisible, setHintsVisible] = useState(false);
   // Bumping this key remounts ArtworkModel, which re-runs its recentre +
   // camera-fit effect. Cheaper than threading a framing API through props.
   const [fitKey, setFitKey] = useState(0);
+
+  useEffect(() => {
+    // Preload only when the viewer actually mounts. Module-level preload
+    // would download ~10 MB every time any Mode A / landing route opens
+    // because router's code-split chunk pre-parses imports.
+    preloadArtwork();
+  }, []);
 
   useEffect(() => {
     const seen = localStorage.getItem(GESTURE_HINTS_KEY) === "1";
@@ -53,45 +59,72 @@ export default function B2Viewer() {
       <TopBar onBack={handleBack} />
 
       <div className="relative flex-1">
-        <Canvas
-          dpr={[1, 2]}
-          // fov 40 reads comfortably for artwork presentation. Camera
-          // position is overridden by ArtworkModel after glTF load.
-          camera={{ fov: 40, near: 0.01, far: 10000 }}
-          gl={{ antialias: true }}
-          className="h-full w-full"
-        >
-          <color attach="background" args={["#0a0a0a"]} />
-          <ambientLight intensity={0.6} />
-          <directionalLight position={[4, 6, 4]} intensity={0.9} />
-          <directionalLight position={[-4, 2, -4]} intensity={0.3} />
+        <ModelErrorBoundary onRetry={resetView}>
+          <Canvas
+            dpr={[1, 2]}
+            // fov 40 reads comfortably for artwork presentation. Camera
+            // position is overridden by ArtworkModel after glTF load.
+            camera={{ fov: 40, near: 0.01, far: 10000 }}
+            gl={{ antialias: true }}
+            className="h-full w-full"
+          >
+            <color attach="background" args={["#0a0a0a"]} />
+            <ambientLight intensity={0.6} />
+            <directionalLight position={[4, 6, 4]} intensity={0.9} />
+            <directionalLight position={[-4, 2, -4]} intensity={0.3} />
 
-          <Suspense fallback={null}>
-            <ArtworkModel key={fitKey} />
-          </Suspense>
+            <Suspense fallback={null}>
+              <ArtworkModel key={fitKey} />
+            </Suspense>
 
-          {/* Distance bounds wide open — ArtworkModel sets the right
-              initial distance; visitors decide how far to push. */}
-          <OrbitControls
-            ref={controlsRef}
-            makeDefault
-            enablePan={false}
-            enableDamping
-            dampingFactor={0.08}
-            minDistance={0.01}
-            maxDistance={10000}
-          />
-        </Canvas>
+            {/* Distance bounds wide open — ArtworkModel sets the right
+                initial distance; visitors decide how far to push. */}
+            <OrbitControls
+              makeDefault
+              enablePan={false}
+              enableDamping
+              dampingFactor={0.08}
+              minDistance={0.01}
+              maxDistance={10000}
+            />
+          </Canvas>
+        </ModelErrorBoundary>
+
+        {/* DOM-space loading fallback — the in-canvas Suspense renders
+            nothing (a 3D spinner would flash inside the dark canvas
+            before unmounting), so the "載入中…" text lives out here and
+            hides itself once ArtworkModel signals ready through fitKey. */}
+        <LoadingOverlay />
 
         {hintsVisible && <GestureHints onDismiss={dismissHints} />}
       </div>
 
-      <BottomToolbar onReset={resetView} onSearch={() => {}} onList={() => {}} />
+      <BottomToolbar onReset={resetView} />
     </main>
   );
 }
 
 const GESTURE_HINTS_KEY = "tcsh:mode-b:gesture-hints-seen";
+
+// ── Loading overlay ───────────────────────────────────────────────────
+function LoadingOverlay() {
+  // Hide itself once the canvas has drawn anything. Keyed off a 0.3s
+  // delay so a fast load doesn't flash the "載入中…" on screen.
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setVisible(true), 300);
+    return () => window.clearTimeout(t);
+  }, []);
+  if (!visible) return null;
+  return (
+    <div
+      aria-live="polite"
+      className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center text-sm text-muted"
+    >
+      載入中…
+    </div>
+  );
+}
 
 // ── Top bar ────────────────────────────────────────────────────────────
 function TopBar({ onBack }: { onBack: () => void }) {
@@ -125,8 +158,8 @@ function BottomToolbar({
   onList,
 }: {
   onReset: () => void;
-  onSearch: () => void;
-  onList: () => void;
+  onSearch?: () => void;
+  onList?: () => void;
 }) {
   return (
     <nav
@@ -135,8 +168,8 @@ function BottomToolbar({
     >
       <div className="pointer-events-auto flex h-14 w-[280px] items-center justify-around rounded-full border border-white/10 bg-white/10 text-fg backdrop-blur-md">
         <ToolbarButton label="重置" icon="↻" onClick={onReset} />
-        <ToolbarButton label="搜尋" icon="🔍" onClick={onSearch} disabled />
-        <ToolbarButton label="列表" icon="☰" onClick={onList} disabled />
+        <ToolbarButton label="搜尋" icon="🔍" onClick={onSearch} />
+        <ToolbarButton label="列表" icon="☰" onClick={onList} />
       </div>
     </nav>
   );
@@ -146,18 +179,17 @@ function ToolbarButton({
   label,
   icon,
   onClick,
-  disabled = false,
 }: {
   label: string;
   icon: string;
-  onClick: () => void;
-  disabled?: boolean;
+  /** Omit to disable the button (useful for B3/B4 placeholders). */
+  onClick?: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
+      disabled={!onClick}
       className="flex h-full w-[92px] flex-col items-center justify-center gap-0.5 disabled:opacity-40"
       aria-label={label}
     >
@@ -171,6 +203,28 @@ function ToolbarButton({
 
 // ── First-visit gesture hints ──────────────────────────────────────────
 function GestureHints({ onDismiss }: { onDismiss: () => void }) {
+  const confirmRef = useRef<HTMLButtonElement>(null);
+
+  // Move focus to the dismiss button on open so keyboard / screen-reader
+  // users don't land on the surrounding page chrome, and listen for
+  // Escape / Tab so the dialog contract holds. Focus is trapped on the
+  // single button (it's the only focusable child), so we just redirect
+  // any Tab attempts back to it.
+  useEffect(() => {
+    confirmRef.current?.focus();
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onDismiss();
+      } else if (e.key === "Tab") {
+        e.preventDefault();
+        confirmRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onDismiss]);
+
   return (
     <div
       role="dialog"
@@ -181,6 +235,7 @@ function GestureHints({ onDismiss }: { onDismiss: () => void }) {
       <HintRow icons="👆 👆" label="雙指縮放" />
       <HintRow icons="👆" label="單指旋轉" />
       <button
+        ref={confirmRef}
         type="button"
         onClick={onDismiss}
         className="rounded-full border border-white/30 bg-white/10 px-8 py-2 text-sm text-white backdrop-blur-md"
