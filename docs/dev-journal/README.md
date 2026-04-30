@@ -15,3 +15,4 @@ append-only 的開發記錄：什麼時候做了什麼、為什麼做。寫給�
 
 - [2026-04-17 — 初始 scaffold](2026-04-17-initial-scaffold.md)
 - [2026-04-18 — AR 追蹤架構（Station-Based AR）](2026-04-18-ar-tracking-architecture.md)
+- [2026-04-30 — GitHub Actions CI（api + web）](2026-04-30-github-actions-ci.md)
