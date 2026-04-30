@@ -1,5 +1,5 @@
-.PHONY: help install dev dev-api dev-web docker-up docker-down docker-build \
-        lint lint-api lint-web format typecheck test clean
+.PHONY: help install dev dev-api dev-web web-dev-https docker-up docker-down \
+        docker-build lint lint-api lint-web format typecheck test clean
 
 help:
 	@echo "tcsh-web-ar — Makefile targets"
@@ -8,6 +8,7 @@ help:
 	@echo "  make dev            Run api + web dev servers locally (two processes)"
 	@echo "  make dev-api        Run only the FastAPI server"
 	@echo "  make dev-web        Run only the Vite dev server"
+	@echo "  make web-dev-https  Vite dev server over HTTPS (mkcert) — for iPhone testing"
 	@echo ""
 	@echo "  make docker-up      Build images and start all containers"
 	@echo "  make docker-down    Stop and remove containers"
@@ -38,6 +39,12 @@ dev-api:
 
 dev-web:
 	cd apps/web && bun run dev
+
+# HTTPS dev server (Mode A iPhone testing — getUserMedia + DeviceOrientationEvent
+# need a secure context). One-time: `brew install mkcert nss && mkcert -install`.
+# See docs/dev/https-local.md for iPhone trust setup.
+web-dev-https:
+	cd apps/web && VITE_HTTPS=1 bun run dev
 
 # ─── docker ───────────────────────────────────────────────────────────
 docker-up:

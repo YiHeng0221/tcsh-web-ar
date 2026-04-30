@@ -146,8 +146,10 @@ bug.
 - **Asset URLs are returned by the API**, not constructed on the client.
   The API signs Supabase Storage upload URLs; the client never sees the
   service role key.
-- **HTTPS in dev too.** `getUserMedia` and WebXR require a secure context;
-  Vite supports it via `--https` (mkcert recommended for local certs).
+- **HTTPS in dev too.** `getUserMedia` and `DeviceOrientationEvent.requestPermission`
+  require a secure context. Run `make web-dev-https` (gated by
+  `VITE_HTTPS=1`, uses `vite-plugin-mkcert`) — see `docs/dev/https-local.md`.
+  Default `bun run dev` stays HTTP; HTTPS is opt-in.
 - **Feature flags over branches** for WIP modes where possible.
 
 ---
