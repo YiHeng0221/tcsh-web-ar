@@ -104,16 +104,23 @@ spec via `openapi-typescript`. Do not hand-write matching TS types.
 
 ### Commands (via Makefile at repo root)
 
+`make help` (or just `make`) prints the full grouped target list. Common
+targets:
+
 ```bash
-make install          # install Python + JS deps
+make setup            # install Python + JS deps (alias: `make install`)
 make dev              # run api + web together (local, no Docker)
 make dev-api          # just the FastAPI server
 make dev-web          # just the Vite dev server
 make docker-up        # full stack in containers
 make docker-down      # stop containers
 make lint             # ruff (api) + eslint (web)
+make format           # auto-format both apps
 make typecheck        # mypy (api) + tsc --noEmit (web)
 make test             # pytest + vitest
+make build            # api docker image + web production bundle
+make db-upgrade       # alembic upgrade head
+make clean            # remove caches, dist/, node_modules
 ```
 
 ### Before finishing any non-trivial change

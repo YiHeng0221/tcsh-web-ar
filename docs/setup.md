@@ -258,16 +258,35 @@ Dockerfile 跟 compose 檔每一段在做什麼，看 `docs/docker.md`。
 
 ## 7. 日常工作流程速查表
 
+跑 `make`（不帶參數）或 `make help` 會印出當下所有可用 target 的分組清單。
+速查最常用：
+
 | 想要…                          | 指令                       |
 | ------------------------------ | -------------------------- |
 | 開始寫 code，不要容器          | `make dev`                 |
 | 用瀏覽器互動測試 API           | http://localhost:8000/docs |
+| 手機在同網段測前端              | `make dev-https`           |
 | 確認整個 app 端對端能跑        | `make docker-up`           |
 | 加一個 Python 依賴              | `cd apps/api && uv add <pkg>` |
 | 加一個 JS 依賴                  | `cd apps/web && bun add <pkg>`    |
 | commit 前：lint + typecheck     | `make lint && make typecheck`     |
 | commit 前：跑測試               | `make test`                       |
-| 快取怪怪的，全部重來            | `make clean && make install`      |
+| 自動 format                     | `make format`                     |
+| Build production artifacts      | `make build`                      |
+| 套用最新 DB migrations          | `make db-upgrade`                 |
+| 產生新的 alembic revision       | `make db-revision MSG="describe"` |
+| 快取怪怪的，全部重來            | `make clean && make setup`        |
+
+### 7.1 Makefile 分組
+
+- **Setup** — `setup` / `setup-api` / `setup-web`（`install` 是別名）
+- **Dev** — `dev`、`dev-api`、`dev-web`、`dev-https`、`docker-up/down/build`
+- **Test** — `test`、`test-api`、`test-web`
+- **Lint / Format / Typecheck** — `lint*`、`format*`、`typecheck*`
+- **Build** — `build`、`build-api`、`build-web`
+- **Database (Alembic)** — `db-upgrade`、`db-downgrade`、`db-revision`、
+  `db-current`、`db-history`
+- **Clean** — `clean`、`clean-api`、`clean-web`
 
 ---
 
