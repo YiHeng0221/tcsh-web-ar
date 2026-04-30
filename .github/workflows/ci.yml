@@ -1,0 +1,113 @@
+# Continuous integration for tcsh-web-ar.
+#
+# Runs on every PR and on push to main. Each job is intentionally narrow so
+# a failure in one stack (api / web) doesn't mask a failure in the other.
+#
+# Stack notes:
+#   - apps/api uses uv (migrated from Poetry on 2026-04-18) with a
+#     [project] / uv.lock layout. Python version is pinned in pyproject.toml
+#     via `requires-python`; we mirror it here on `python-version`.
+#   - apps/web uses Bun + Vite. We install with `--frozen-lockfile` so a
+#     drifted bun.lock is treated as a CI failure, not silently rewritten.
+#
+# Out of scope (deliberately deferred — see #33 / #34):
+#   - Deploy steps and any secret-dependent integrations.
+#   - ESLint and openapi-types-check: both have pre-existing repo state
+#     issues (no eslint.config.* file; types.ts stale relative to the API).
+#     Tracking issue and follow-up PR will land them once the underlying
+#     state is fixed; adding them here would gate every PR on unrelated
+#     bugs.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel in-progress runs of the same workflow on the same ref. PRs typically
+# get force-pushed during review; the older run becomes irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    name: api (ruff + mypy + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        # Pin to a specific tagged release; uv ships breaking changes on
+        # minor bumps occasionally and we want CI to be deterministic.
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.22"
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+
+      - name: Set up Python
+        # `requires-python = ">=3.12,<3.13"` in pyproject.toml — pin to the
+        # same minor here so CI matches what developers run locally.
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff (lint)
+        run: uv run ruff check src tests
+
+      - name: Mypy (typecheck)
+        run: uv run mypy
+
+      - name: Pytest
+        # Tests in apps/api/tests/auth do not touch the network or DB
+        # (every external call is monkeypatched). No Postgres service
+        # required at present. Revisit when integration tests land.
+        run: uv run pytest
+
+  web:
+    name: web (tsc + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          # No `packageManager` field in apps/web/package.json yet — pin
+          # explicitly so CI is reproducible. Matches local dev (1.2.x).
+          bun-version: "1.2.15"
+
+      - name: Cache Bun install store
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('apps/web/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck (tsc --noEmit)
+        run: bun run typecheck
+
+      - name: Build (tsc -b && vite build)
+        # `build` re-runs tsc in project-references mode and then bundles.
+        # It catches issues `typecheck` misses (composite project graph,
+        # asset resolution) and produces the artifact deploy will ship.
+        run: bun run build
