@@ -6,8 +6,12 @@ FastAPI backend for tcsh-web-ar.
 
 ```bash
 cd apps/api
-cp .env.example .env          # then fill Supabase keys
+cp .env.example .env
+# generate an admin hash + JWT secret to paste into .env:
+uv run python -m tcsh_ar_api.create_admin admin@example.com 'admin1234' --with-jwt-secret
 uv sync
+uv run alembic upgrade head             # create tables
+uv run python -m tcsh_ar_api.seed       # optional: sample anchors / objects
 uv run uvicorn tcsh_ar_api.main:app --reload
 ```
 
@@ -33,11 +37,12 @@ src/tcsh_ar_api/
   db/               SQLAlchemy base + async session (to be added in #4)
   core/             cross-cutting helpers (exceptions, logging)
   health/           /health
-  auth/             Supabase JWT verification (to be added in #5)
-  anchors/          (to be added in #7) router / schemas / repository / service / models
-  objects/          (to be added in #8)
-  placements/       (to be added in #9)
-  textures/         (to be added in #6, #10) + storage.py for Supabase Storage
+  auth/             local single-admin JWT (login + me + verify)
+  anchors/          router / schemas / repository / service / models
+  objects/          ar_objects domain
+  placements/       per-anchor object placements
+  textures/         multipart upload + local-filesystem storage
+  create_admin.py   CLI to bcrypt a password for ADMIN_PASSWORD_HASH
   seed.py           CLI seed script
 ```
 

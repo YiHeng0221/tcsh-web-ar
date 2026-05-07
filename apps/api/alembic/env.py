@@ -1,4 +1,4 @@
-"""Alembic environment — async version for SQLAlchemy 2.0 + asyncpg.
+"""Alembic environment — async version for SQLAlchemy 2.0 + aiosqlite.
 
 Imports every domain module's `models.py` so `--autogenerate` sees the full
 metadata. If you add a new domain module, add its import here too.
@@ -26,13 +26,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Migrations always use the direct / session-mode URL — the transaction pool
-# on port 6543 does not support DDL reliably since Supavisor 2025-02-28.
-# We pass the URL directly to the engine rather than round-tripping through
-# alembic.ini's configparser (which would try to % -interpolate any percent
-# signs in the password).
+# Migrations resolve the URL from Settings rather than alembic.ini's
+# configparser, which would try to %-interpolate any percent signs in a
+# Postgres password if/when the deployment swaps backends.
 _settings = get_settings()
 _DATABASE_URL = _settings.database_url_direct
+_IS_SQLITE = _DATABASE_URL.startswith("sqlite")
 
 target_metadata = Base.metadata
 
@@ -43,13 +42,22 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        # SQLite cannot ALTER TABLE in-place beyond a few simple cases, so
+        # batch mode rewrites the table whenever a column changes. Harmless
+        # on Postgres, so we leave it on unconditionally for SQLite and skip
+        # otherwise.
+        render_as_batch=_IS_SQLITE,
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        render_as_batch=_IS_SQLITE,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

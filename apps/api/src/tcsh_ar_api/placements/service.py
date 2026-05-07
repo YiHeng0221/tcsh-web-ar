@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 
 from tcsh_ar_api.anchors.repository import AnchorRepository
+from tcsh_ar_api.db.integrity import IntegrityCause, classify_integrity_error
 from tcsh_ar_api.placements.exceptions import (
     PlacementAnchorFilterError,
     PlacementConflictError,
@@ -13,11 +14,6 @@ from tcsh_ar_api.placements.exceptions import (
 from tcsh_ar_api.placements.models import Placement
 from tcsh_ar_api.placements.repository import PlacementRepository
 from tcsh_ar_api.placements.schemas import PlacementCreate, PlacementUpdate
-
-# PostgreSQL SQLSTATE codes — see
-# https://www.postgresql.org/docs/current/errcodes-appendix.html
-_SQLSTATE_FOREIGN_KEY_VIOLATION = "23503"
-_SQLSTATE_UNIQUE_VIOLATION = "23505"
 
 
 class PlacementService:
@@ -82,28 +78,20 @@ class PlacementService:
             raise
 
 
-def _sqlstate(exc: IntegrityError) -> str | None:
-    # asyncpg-specific: IntegrityConstraintViolationError exposes `sqlstate`
-    # on the wrapped `orig`. psycopg / psycopg2 would use `pgcode` instead,
-    # so this helper silently falls back to 500 if the driver ever changes.
-    # Sibling domains (anchors / objects) mirror this assumption.
-    return getattr(getattr(exc, "orig", None), "sqlstate", None)
-
-
 def _classify_mutation_integrity_error(exc: IntegrityError) -> NoReturn:
     """Split the integrity failure modes so each one gets the correct status.
 
-    - 23503 (FK violation): the body's ar_object_id / anchor_id / texture_id
-      points at a nonexistent row — surface as 422 (unprocessable).
-    - 23505 (unique violation): (ar_object_id, anchor_id) pair already has
-      a placement — surface as 409 (conflict).
+    - FK violation: the body's ar_object_id / anchor_id / texture_id points
+      at a nonexistent row — surface as 422 (unprocessable).
+    - Unique violation: (ar_object_id, anchor_id) pair already has a
+      placement — surface as 409 (conflict).
     - Anything else (NOT NULL, CHECK, deferred constraints, unexpected
       dialect errors): re-raise so FastAPI returns 500. Collapsing every
       IntegrityError into 409 hid real bugs behind a misleading code.
     """
-    sqlstate = _sqlstate(exc)
-    if sqlstate == _SQLSTATE_FOREIGN_KEY_VIOLATION:
+    cause = classify_integrity_error(exc)
+    if cause is IntegrityCause.FOREIGN_KEY_VIOLATION:
         raise PlacementDependencyMissingError() from exc
-    if sqlstate == _SQLSTATE_UNIQUE_VIOLATION:
+    if cause is IntegrityCause.UNIQUE_VIOLATION:
         raise PlacementConflictError() from exc
     raise exc

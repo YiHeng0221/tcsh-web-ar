@@ -4,6 +4,13 @@
 # For day-to-day development we recommend `make dev` (native uv + Bun)
 # for faster iteration; `make docker-up` is for reproducing the production
 # build locally or sharing a single-command setup.
+#
+# Note: the API uses a SQLite file. Inside the container the working dir
+# is `/app`, so a default `DATABASE_URL=sqlite+aiosqlite:///./tcsh.db`
+# resolves to `/app/tcsh.db`. To persist the DB across `docker compose
+# down`, point `DATABASE_URL` at `/data/tcsh.db` in `apps/api/.env` (the
+# named volume below mounts at `/data`). Wipe it with `docker compose
+# down -v`.
 
 services:
   api:
@@ -15,6 +22,8 @@ services:
       - ./apps/api/.env
     ports:
       - "8000:8000"
+    volumes:
+      - api_db:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
@@ -33,3 +42,6 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  api_db:
