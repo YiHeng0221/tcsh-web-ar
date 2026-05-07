@@ -122,46 +122,84 @@ cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
 ```
 
-### 3.1 Supabase 憑證
+### 3.1 資料庫（SQLite，零設定）
 
-你需要一個 Supabase 專案（免費方案就夠了）。本專案採用 **2025 後的新
-Supabase 系統**（publishable/secret keys、非對稱 JWKS、Supavisor pooler
-兩條 URL）。如果你是從舊教學過來的請注意這幾個已不是 `anon` /
-`service_role` / 靜態 `JWT_SECRET` 了。
+關聯式資料用 **SQLite**（透過 `aiosqlite` async driver）。`.env.example`
+裡的預設值會把資料寫進 `apps/api/tcsh.db`——你**完全不用安裝
+PostgreSQL**，第一次跑 `alembic upgrade head` 時 SQLAlchemy 會自動把
+DB 檔案建出來。
 
-**從 Supabase dashboard 抓以下內容：**
+```
+DATABASE_URL=sqlite+aiosqlite:///./tcsh.db
+DATABASE_URL_DIRECT=sqlite+aiosqlite:///./tcsh.db
+```
 
-1. **Project Settings → API Keys**（新 tab，不是舊的「API」分頁）
-   → 若尚未啟用新制，點 `Create new API Keys`。會拿到：
-   - `sb_publishable_...`（前端可用）
-   - `sb_secret_...`（**機密**，只能後端，取代舊的 `service_role`）
-2. **Project Settings → Database → Connection string** — 會看到幾個頁籤
-   （**Direct / Session pooler / Transaction pooler**）。
-   - **用 Session pooler**（port **5432**）—— `DATABASE_URL` 與
-     `DATABASE_URL_DIRECT` 兩個欄位都填這條。
-   - **為什麼不用 transaction pool（6543）**：Transaction mode 是給
-     serverless 短連線情境，不支援 prepared statements；但
-     SQLAlchemy 的 asyncpg dialect 每個 query 都會 prepare()，
-     因此長期跑的 FastAPI 得用 session mode。
-   - 記得把開頭 `postgresql://` 換成 `postgresql+asyncpg://`。
-   - 密碼中的特殊字元要 URL-encode（例：`$` → `%24`、`#` → `%23`）。
-3. **JWKS endpoint** — 不用特別去 dashboard 複製，URL 格式固定：
-   `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`。
-   後端透過這個 URL 拿公鑰驗 JWT，**不需要再存任何 secret**，而且
-   Supabase 要 rotate key 時你不用重新部署。
+兩個 URL 同檔案、同設定；保留兩個欄位是為了未來如果換 host（或
+swap 回 Postgres）時，runtime 跟 migrations 可以指向不同位置。
+
+要砍掉重練：
+
+```bash
+rm apps/api/tcsh.db
+cd apps/api && uv run alembic upgrade head
+```
+
+> Auth 跟 Storage 已經 **完全本地化**（見 3.2），不再需要 Supabase 帳號。
+> 如果之後要把資料 DB 換回 Postgres / Supabase Postgres，把上面兩個
+> URL 換成 `postgresql+asyncpg://...` 即可，model / migration / 業務
+> 邏輯都不用改（type 都是 dialect-portable 的）。
+
+### 3.2 本地單一 Admin（取代 Supabase Auth）
+
+從 2026-04-25 起，後端 **不再依賴 Supabase**——登入跟貼圖儲存都改成
+本地化：
+
+- **登入**：環境變數裡放一組 admin email + bcrypt 密碼 hash，後端用
+  HS256 自己簽 / 自己驗 JWT。沒有 user table、沒有外部 auth provider。
+- **貼圖儲存**：上傳的圖直接寫進 `apps/api/storage/textures/`，前端
+  透過 `GET /textures/{id}/file` 拉檔。
+
+**產生 admin 密碼 hash：**
+
+```bash
+cd apps/api
+uv run python -m tcsh_ar_api.create_admin admin@example.com 'your-strong-password' --with-jwt-secret
+```
+
+它會印出可以直接貼進 `.env` 的區塊：
+
+```
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD_HASH=$2b$12$...
+JWT_SECRET=64-hex-chars-of-randomness
+JWT_EXPIRES_SECONDS=86400
+```
 
 **最後的填值：**
 
 - `apps/api/.env`
-  - `DATABASE_URL=postgresql+asyncpg://postgres.xxx:PW@aws-0-REGION.pooler.supabase.com:6543/postgres`
-  - `DATABASE_URL_DIRECT=postgresql+asyncpg://postgres.xxx:PW@aws-0-REGION.pooler.supabase.com:5432/postgres`
-  - `SUPABASE_URL=https://xxxx.supabase.co`
-  - `SUPABASE_PUBLISHABLE_KEY=sb_publishable_...`
-  - `SUPABASE_SECRET_KEY=sb_secret_...`   # ← 只能在後端！
-  - `SUPABASE_JWKS_URL=https://xxxx.supabase.co/auth/v1/.well-known/jwks.json`
+  - `DATABASE_URL=sqlite+aiosqlite:///./tcsh.db`
+  - `DATABASE_URL_DIRECT=sqlite+aiosqlite:///./tcsh.db`
+  - `JWT_SECRET=...`（剛剛產生的 hex）
+  - `ADMIN_EMAIL=admin@example.com`
+  - `ADMIN_PASSWORD_HASH=$2b$12$...`（剛剛產生的 hash）
+  - `JWT_EXPIRES_SECONDS=86400`
+  - `TEXTURE_STORAGE_DIR=./storage/textures`
 - `apps/web/.env`
-  - `VITE_SUPABASE_URL=https://xxxx.supabase.co`
-  - `VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...`   # ← 可以安全放瀏覽器
+  - `VITE_API_BASE_URL=http://localhost:8000`（前端用相對路徑時可省略）
+
+> repo 提供的 `.env` 預設是 `admin@example.com / admin1234`，方便第一次
+> 跑起來。**部署前務必換掉**：重跑 create_admin 拿新 hash + 新 JWT_SECRET。
+
+### 3.3 套用 schema、灌測試資料
+
+```bash
+cd apps/api
+uv run alembic upgrade head      # 建表
+uv run python -m tcsh_ar_api.seed  # 灌 5 anchors / 7 objects / 2 placements
+```
+
+砍掉重練：`rm tcsh.db && uv run alembic upgrade head`。
 
 ---
 

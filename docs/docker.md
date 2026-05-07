@@ -195,6 +195,16 @@ container 啟動時，從本地 `.env` 讀環境變數。（`.env` 不會 commit
 就能打到 API。
 
 ```yaml
+    volumes:
+      - api_db:/data
+```
+named volume 把容器內的 `/data/` 持久化。SQLite DB 預設寫到 `/app/tcsh.db`；
+如果你希望 `docker compose down` 之後資料還在，把 `apps/api/.env` 裡的
+`DATABASE_URL` 改成 `sqlite+aiosqlite:////data/tcsh.db`（注意 path 有四
+個斜線——前三個是 URL scheme 的 `://` + 絕對 path 的開頭 `/`）。要砍
+DB 連同 volume 一起：`docker compose down -v`。
+
+```yaml
     restart: unless-stopped
 ```
 container 如果 crash 自動重啟，除非你明確停掉它。
@@ -247,10 +257,11 @@ docker system prune -a
 
 **症狀：** `uv sync` 在 build 中途失敗。
 試試：`docker compose build --no-cache api`。如果錯誤訊息是缺某個系統
-library（例如 `libpq-dev`），用 `RUN apt-get update && apt-get
-install -y libpq-dev` 加上去。另一個常見錯誤是 `uv.lock` 落後於
-`pyproject.toml`（因為我們加了 `--frozen`）——這時要在本地跑 `uv sync`
-更新 lockfile 再 commit。
+library，用 `RUN apt-get update && apt-get install -y <pkg>` 加上去。
+另一個常見錯誤是 `uv.lock` 落後於 `pyproject.toml`（因為我們加了
+`--frozen`）——這時要在本地跑 `uv sync` 更新 lockfile 再 commit。
+（資料 DB 走 SQLite + aiosqlite，所以 image 裡不需要 `libpq-dev` 之類的
+Postgres client lib。）
 
 **症狀：** `bun install` 失敗，訊息是「lockfile out of sync」。
 修法：刪掉 `apps/web/bun.lockb` 重 build。然後把新的 lockfile commit 上去。

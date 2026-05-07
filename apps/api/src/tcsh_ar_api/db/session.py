@@ -1,25 +1,45 @@
 from collections.abc import AsyncGenerator
+from typing import Any
 
+from sqlalchemy import event
+from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import ConnectionPoolEntry
 
 from tcsh_ar_api.config import get_settings
 
 _settings = get_settings()
 
-# Supabase's Supavisor transaction pooler (port 6543) multiplexes many clients
-# over the same backend connection, so prepared statements cannot be cached on
-# the session. Disable both caches: `statement_cache_size` covers asyncpg's
-# own cache; `prepared_statement_cache_size` covers the SQLAlchemy-asyncpg
-# dialect's layer on top.
-engine = create_async_engine(
-    _settings.database_url,
-    pool_pre_ping=True,
-    echo=False,
-    connect_args={
-        "statement_cache_size": 0,
-        "prepared_statement_cache_size": 0,
-    },
-)
+# SQLite (via aiosqlite) is the default backend for local dev. The
+# `check_same_thread=False` arg lets aiosqlite hand the connection between
+# threads — required because SQLAlchemy's async layer dispatches calls onto a
+# worker thread, not the event-loop thread that opened the connection.
+_engine_kwargs: dict[str, Any] = {"echo": False}
+if _settings.database_url.startswith("sqlite"):
+    _engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:  # pragma: no cover — non-SQLite dialects aren't exercised in tests
+    # Pre-ping protects long-lived workers from stale TCP connections;
+    # SQLite's in-process file handle never goes stale, so we skip it there.
+    _engine_kwargs["pool_pre_ping"] = True
+
+engine = create_async_engine(_settings.database_url, **_engine_kwargs)
+
+
+# SQLite ships with foreign-key enforcement *off* by default — every new
+# connection has to opt in via `PRAGMA foreign_keys=ON`, otherwise our
+# `ondelete="CASCADE" / SET NULL` clauses silently no-op. Hook the sync
+# DBAPI-connect event so the pragma fires once per connection.
+if _settings.database_url.startswith("sqlite"):
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragma(
+        dbapi_connection: DBAPIConnection,
+        _connection_record: ConnectionPoolEntry,
+    ) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
 
 SessionLocal = async_sessionmaker(
     bind=engine,

@@ -1,14 +1,28 @@
-from pydantic import BaseModel, Field
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, computed_field
 
 
-class UploadURLRequest(BaseModel):
-    filename: str = Field(min_length=1, max_length=256)
-    mime: str
-    size_bytes: int = Field(gt=0)
+class TextureOut(BaseModel):
+    """Texture row as returned by the API.
 
+    `file_url` is a relative URL; the frontend prepends `VITE_API_BASE_URL`
+    before fetching. Computed from `id` so callers don't construct the
+    string themselves.
+    """
 
-class UploadURLResponse(BaseModel):
-    upload_url: str
-    storage_path: str
-    token: str
-    expires_at: int  # unix seconds
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    label: str
+    filename: str
+    mime_type: str
+    size_bytes: int
+    created_at: datetime
+    updated_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def file_url(self) -> str:
+        return f"/textures/{self.id}/file"

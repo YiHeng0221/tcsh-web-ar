@@ -47,7 +47,7 @@ export const router = createBrowserRouter([
     ),
   },
 
-  { path: "/_studio/:token", element: <ModeCRoot /> },
+  { path: "/_studio/:token/*", element: <ModeCRoot /> },
   { path: "/_studio", element: <Navigate to="/" replace /> },
 
   { path: "*", element: <NotFound /> },

@@ -22,6 +22,10 @@ type Props = {
   /** Multiplier on the longest bbox axis when placing the camera. 1 = snug,
    *  higher = more margin. Defaults to 1.8 — comfortable framing. */
   framing?: number;
+  /** Fires once after the cloned scene is recentered and the camera has
+   *  been framed — i.e. the first render with the artwork actually visible.
+   *  Used by B2Viewer to hide its DOM-space "載入中…" overlay. */
+  onReady?: () => void;
 };
 
 /**
@@ -40,7 +44,7 @@ type Props = {
  * of `/b` leaks GPU memory (frontend.md: "Dispose geometry/material/
  * texture on unmount — else GPU leak").
  */
-export function ArtworkModel({ framing = 1.8 }: Props = {}) {
+export function ArtworkModel({ framing = 1.8, onReady }: Props = {}) {
   // drei's useGLTF overload returns `(GLTF & ObjectMap) | (GLTF & ObjectMap)[]`
   // so narrow to the single-URL shape — TS can't prove the union itself.
   const gltf = useGLTF(ARTWORK_MODEL_URL) as GLTF;
@@ -89,7 +93,9 @@ export function ArtworkModel({ framing = 1.8 }: Props = {}) {
       controls.target.set(0, 0, 0);
       controls.update();
     }
-  }, [scene, camera, controls, framing]);
+
+    onReady?.();
+  }, [scene, camera, controls, framing, onReady]);
 
   // Dispose the cloned GPU resources when the component unmounts.
   // Runs once per mount (empty deps); by that time `scene` is stable

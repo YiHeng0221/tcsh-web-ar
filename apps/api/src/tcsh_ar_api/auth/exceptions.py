@@ -10,6 +10,11 @@ class AuthError(Exception):
         super().__init__(self.detail)
 
 
+class InvalidCredentialsError(AuthError):
+    status_code = 401
+    detail = "Invalid credentials"
+
+
 class InvalidTokenError(AuthError):
     status_code = 401
     detail = "invalid or expired token"

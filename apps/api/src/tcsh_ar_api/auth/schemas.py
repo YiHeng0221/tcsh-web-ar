@@ -1,34 +1,34 @@
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 
-class TokenClaims(BaseModel):
-    """Subset of Supabase JWT claims that we rely on.
+class LoginRequest(BaseModel):
+    """POST /auth/login body."""
 
-    Supabase JWT payload contains more fields (iat, aud, session_id, …); we
-    only model the ones we use so mypy catches typos.
+    email: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class TokenResponse(BaseModel):
+    """POST /auth/login 200 response."""
+
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int  # seconds
+
+
+class LocalUser(BaseModel):
+    """Resolved admin identity carried inside request handlers.
+
+    There is exactly one admin, configured from settings. `is_admin` stays in
+    the model so existing route deps that read `user.is_admin` keep working.
     """
 
-    sub: str
-    # `verify_aud=True` / `verify_exp=True` in jwt.decode guarantee these
-    # are present and non-expired before we build this model; narrowing the
-    # types so downstream code doesn't need to paper over theoretical Nones.
-    # RFC 7519 §4.1.3 allows `aud` to be a string or a list of strings;
-    # Supabase currently sends a string, but accept both so a provider change
-    # surfaces as 401 validation via the normal path, not a 500 here.
-    aud: str | list[str]
-    exp: int
-    email: str | None = None
-    role: str | None = None  # Supabase RLS role, e.g. "authenticated"
-    iat: int | None = None
-    app_metadata: dict[str, Any] = Field(default_factory=dict)
-    user_metadata: dict[str, Any] = Field(default_factory=dict)
+    email: str
+    is_admin: bool = True
 
 
-class CurrentUser(BaseModel):
-    """Resolved user identity for use inside request handlers."""
+class MeResponse(BaseModel):
+    """GET /auth/me response."""
 
-    id: str
-    email: str | None
+    email: str
     is_admin: bool

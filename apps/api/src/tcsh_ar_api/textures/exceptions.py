@@ -22,6 +22,13 @@ class FileTooLargeError(TextureError):
     detail = "file too large"
 
 
+class TextureNotFoundError(TextureError):
+    status_code = 404
+    detail = "texture not found"
+
+
 class StorageError(TextureError):
-    status_code = 502
-    detail = "storage backend error"
+    """Filesystem-level failure (disk full, permission denied, …)."""
+
+    status_code = 500
+    detail = "storage error"

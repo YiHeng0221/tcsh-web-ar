@@ -1,18 +1,35 @@
 import { OrbitControls } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Vector3 } from "three";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 
+import type { ARObject } from "@/lib/api";
 import { ArtworkModel, preloadArtwork } from "@/lib/3d/ArtworkModel";
 import { ModelErrorBoundary } from "@/lib/3d/ModelErrorBoundary";
+import {
+  ViewerContext,
+  type ViewerController,
+} from "@/modes/b/components/ViewerContext";
+
+// B3 / B4 are heavy-ish (TanStack Query + their own subtree) and only
+// open on demand from the toolbar — code-split so the canvas first paint
+// isn't blocked behind their bundle. Inside an already-lazy route, this
+// is a second-tier split: still cheaper than eager-loading two screens
+// the user might never open.
+const B3Search = lazy(() => import("@/modes/b/screens/B3Search"));
+const B4List = lazy(() => import("@/modes/b/screens/B4List"));
 
 /**
  * B2 · 3D Viewer (issue #19).
  *
  * Fullbleed R3F canvas showing the artwork's glTF. Matches Figma 5:13 /
  * 5:55 — dark background, top chrome bar, bottom pill toolbar, first-visit
- * gesture overlay. B3 (#20 search) and B4 (#21 list) land as sub-routes
- * triggered from this toolbar.
+ * gesture overlay. B3 (#20 search) and B4 (#21 list) mount as overlays
+ * over this screen (sheet on mobile / portrait, side panel on landscape)
+ * and use a `ViewerController` context to fly the camera to a chosen
+ * object.
  *
  * Camera framing lives inside ArtworkModel (`src/lib/3d/`): the model
  * owns its own recentre + zoom-to-fit so any caller just drops it in.
@@ -23,6 +40,21 @@ export default function B2Viewer() {
   // Bumping this key remounts ArtworkModel, which re-runs its recentre +
   // camera-fit effect. Cheaper than threading a framing API through props.
   const [fitKey, setFitKey] = useState(0);
+  // Set true the first time ArtworkModel's onReady fires; stays true
+  // across resetView bumps because the glTF is already cached by drei,
+  // so the remount is near-instant and flashing "載入中…" back on would
+  // be misleading.
+  const [modelReady, setModelReady] = useState(false);
+  // Which overlay (if any) sits on top of the canvas. Mutually exclusive
+  // — opening one closes the other.
+  const [overlay, setOverlay] = useState<"search" | "list" | null>(null);
+
+  // Imperative handle into the canvas' OrbitControls + camera, populated
+  // by <CanvasBridge /> below. Refs (not state) so updating them doesn't
+  // re-render the controller object identity, which would re-fire any
+  // memoised consumers downstream.
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const flyTargetRef = useRef<Vector3 | null>(null);
 
   useEffect(() => {
     // Preload only when the viewer actually mounts. Module-level preload
@@ -46,76 +78,184 @@ export default function B2Viewer() {
     else navigate("/", { replace: true });
   }
 
-  function resetView() {
+  const resetView = useCallback(() => {
+    flyTargetRef.current = null;
     setFitKey((n) => n + 1);
-  }
+  }, []);
+
+  // Fly-to behaviour: until placements expose per-object world coordinates
+  // we approximate by placing the orbit target at a deterministic point
+  // around the artwork's centre derived from the object id. Real placement
+  // wiring (Mode C ships transforms) replaces `objectAnchorPoint` with a
+  // lookup against the placements query without touching this controller.
+  const flyToObject = useCallback((object: ARObject) => {
+    const target = objectAnchorPoint(object.id);
+    flyTargetRef.current = target;
+    // Force CanvasBridge to re-run by bumping fitKey — cheaper than a
+    // separate state slot just for the flyTo trigger, and we naturally
+    // want the model to be settled before tweening.
+    setFitKey((n) => n + 1);
+  }, []);
+
+  // Stable controller identity so context consumers don't re-render on
+  // unrelated state changes (e.g. opening / closing the overlay).
+  const controller = useMemo<ViewerController>(
+    () => ({ flyToObject, resetView }),
+    [flyToObject, resetView],
+  );
 
   return (
-    <main
-      data-mode="b"
-      data-screen="b2"
-      className="relative flex h-dvh w-screen flex-col overflow-hidden bg-bg text-fg"
-    >
-      <TopBar onBack={handleBack} />
+    <ViewerContext value={controller}>
+      <main
+        data-mode="b"
+        data-screen="b2"
+        className="relative flex h-dvh w-screen flex-col overflow-hidden bg-bg text-fg"
+      >
+        <TopBar onBack={handleBack} />
 
-      <div className="relative flex-1">
-        <ModelErrorBoundary onRetry={resetView}>
-          <Canvas
-            dpr={[1, 2]}
-            // fov 40 reads comfortably for artwork presentation. Camera
-            // position is overridden by ArtworkModel after glTF load.
-            camera={{ fov: 40, near: 0.01, far: 10000 }}
-            gl={{ antialias: true }}
-            className="h-full w-full"
-          >
-            <color attach="background" args={["#0a0a0a"]} />
-            <ambientLight intensity={0.6} />
-            <directionalLight position={[4, 6, 4]} intensity={0.9} />
-            <directionalLight position={[-4, 2, -4]} intensity={0.3} />
+        <div className="relative flex-1">
+          <ModelErrorBoundary onRetry={resetView}>
+            <Canvas
+              dpr={[1, 2]}
+              // fov 40 reads comfortably for artwork presentation. Camera
+              // position is overridden by ArtworkModel after glTF load.
+              camera={{ fov: 40, near: 0.01, far: 10000 }}
+              gl={{ antialias: true }}
+              className="h-full w-full"
+            >
+              <color attach="background" args={["#0a0a0a"]} />
+              <ambientLight intensity={0.6} />
+              <directionalLight position={[4, 6, 4]} intensity={0.9} />
+              <directionalLight position={[-4, 2, -4]} intensity={0.3} />
 
+              <Suspense fallback={null}>
+                <ArtworkModel key={fitKey} onReady={() => setModelReady(true)} />
+              </Suspense>
+
+              {/* Distance bounds wide open — ArtworkModel sets the right
+                  initial distance; visitors decide how far to push. */}
+              <OrbitControls
+                ref={controlsRef}
+                makeDefault
+                enablePan={false}
+                enableDamping
+                dampingFactor={0.08}
+                minDistance={0.01}
+                maxDistance={10000}
+              />
+
+              <CanvasBridge flyTargetRef={flyTargetRef} fitKey={fitKey} />
+            </Canvas>
+          </ModelErrorBoundary>
+
+          {/* DOM-space loading fallback — the in-canvas Suspense renders
+              nothing (a 3D spinner would flash inside the dark canvas
+              before unmounting), so the "載入中…" text lives out here and
+              hides itself once ArtworkModel fires onReady. */}
+          <LoadingOverlay loaded={modelReady} />
+
+          {hintsVisible && <GestureHints onDismiss={dismissHints} />}
+
+          {/* Overlay layer: B3 / B4 are absolutely positioned siblings of
+              the canvas, so they cover the whole viewer area but leave
+              the top bar / bottom toolbar visible behind them only on
+              tablet-landscape (where they dock to the right). */}
+          {overlay !== null && (
             <Suspense fallback={null}>
-              <ArtworkModel key={fitKey} />
+              {overlay === "search" ? (
+                <B3Search onClose={() => setOverlay(null)} />
+              ) : (
+                <B4List onClose={() => setOverlay(null)} />
+              )}
             </Suspense>
+          )}
+        </div>
 
-            {/* Distance bounds wide open — ArtworkModel sets the right
-                initial distance; visitors decide how far to push. */}
-            <OrbitControls
-              makeDefault
-              enablePan={false}
-              enableDamping
-              dampingFactor={0.08}
-              minDistance={0.01}
-              maxDistance={10000}
-            />
-          </Canvas>
-        </ModelErrorBoundary>
-
-        {/* DOM-space loading fallback — the in-canvas Suspense renders
-            nothing (a 3D spinner would flash inside the dark canvas
-            before unmounting), so the "載入中…" text lives out here and
-            hides itself once ArtworkModel signals ready through fitKey. */}
-        <LoadingOverlay />
-
-        {hintsVisible && <GestureHints onDismiss={dismissHints} />}
-      </div>
-
-      <BottomToolbar onReset={resetView} />
-    </main>
+        <BottomToolbar
+          onReset={resetView}
+          onSearch={() => setOverlay("search")}
+          onList={() => setOverlay("list")}
+        />
+      </main>
+    </ViewerContext>
   );
 }
 
 const GESTURE_HINTS_KEY = "tcsh:mode-b:gesture-hints-seen";
 
-// ── Loading overlay ───────────────────────────────────────────────────
-function LoadingOverlay() {
-  // Hide itself once the canvas has drawn anything. Keyed off a 0.3s
-  // delay so a fast load doesn't flash the "載入中…" on screen.
-  const [visible, setVisible] = useState(false);
+// ── Canvas-side bridge ────────────────────────────────────────────────
+/**
+ * Lives inside the R3F Canvas so it has direct access to `useThree` —
+ * lets us imperatively update OrbitControls' target when a B3 / B4 row
+ * fires `flyToObject`. Refs (not state) flow in because we don't want
+ * a re-render every time the target updates; OrbitControls reads its
+ * own target each frame.
+ */
+function CanvasBridge({
+  flyTargetRef,
+  fitKey,
+}: {
+  flyTargetRef: React.RefObject<Vector3 | null>;
+  fitKey: number;
+}) {
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
+
   useEffect(() => {
-    const t = window.setTimeout(() => setVisible(true), 300);
+    const target = flyTargetRef.current;
+    if (!controls || !target) return;
+    // Move the orbit pivot to the requested point and pull the camera
+    // off-axis so the framing change is visible. We keep the user's
+    // current camera distance — feels less jarring than yanking them
+    // close, and they can still pinch to zoom.
+    const offset = new Vector3()
+      .copy(camera.position)
+      .sub(controls.target);
+    const distance = offset.length() || 1;
+    // Damp distance to a sensible range so a flyTo with the camera
+    // already pulled way out doesn't leave the object as a speck.
+    const desired = Math.min(Math.max(distance, 1), 6);
+    offset.normalize().multiplyScalar(desired);
+
+    controls.target.copy(target);
+    camera.position.copy(target).add(offset);
+    camera.updateProjectionMatrix();
+    controls.update();
+    // Single-shot — clear the request so a later resetView doesn't
+    // re-apply this target.
+    flyTargetRef.current = null;
+  }, [fitKey, camera, controls, flyTargetRef]);
+
+  return null;
+}
+
+/**
+ * Deterministic "where does this object live?" helper. Until placements
+ * expose true world coordinates this projects the object id onto a
+ * circle around the artwork's centre at a believable height — enough to
+ * make flyTo feel responsive in development. Replace with a real
+ * placement lookup once Mode C populates `transform.position`.
+ */
+function objectAnchorPoint(id: string): Vector3 {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  const angle = (hash % 360) * (Math.PI / 180);
+  const radius = 0.6;
+  const height = ((hash >> 8) % 100) / 100 - 0.5; // -0.5..0.5
+  return new Vector3(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
+}
+
+// ── Loading overlay ───────────────────────────────────────────────────
+function LoadingOverlay({ loaded }: { loaded: boolean }) {
+  // Gate the 300 ms appearance delay so a fast load doesn't flash "載入中…"
+  // on screen. Once `loaded` flips true we stop showing entirely — even if
+  // the delay hadn't yet fired.
+  const [delayElapsed, setDelayElapsed] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setDelayElapsed(true), 300);
     return () => window.clearTimeout(t);
   }, []);
-  if (!visible) return null;
+  if (loaded || !delayElapsed) return null;
   return (
     <div
       aria-live="polite"

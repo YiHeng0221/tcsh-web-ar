@@ -37,9 +37,12 @@ export type UVTransform = S["UVTransform"];
 export type Vec3 = S["Vec3"];
 export type Quat = S["Quat"];
 
-// Textures
-export type UploadURLRequest = S["UploadURLRequest"];
-export type UploadURLResponse = S["UploadURLResponse"];
+// Textures — the legacy `UploadURLRequest` / `UploadURLResponse` aliases
+// were dropped along with the Supabase signed-URL flow (2026-04). The new
+// upload path POSTs multipart directly to `/textures` and consumes the
+// hand-written `Texture` shape from `@/modes/c/lib/textureApi`. Once the
+// backend regenerates OpenAPI with a `TextureOut` schema, re-export it
+// here so the rest of the app picks it up automatically.
 
 // Useful when writing fetch helpers against specific endpoints.
 export type { components, paths };

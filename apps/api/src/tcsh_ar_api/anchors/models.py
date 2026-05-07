@@ -4,11 +4,10 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, Integer, String, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from tcsh_ar_api.db.base import Base
+from tcsh_ar_api.db.base import GUID, Base
 
 if TYPE_CHECKING:
     from tcsh_ar_api.placements.models import Placement
@@ -26,11 +25,11 @@ class Anchor(Base):
     __tablename__ = "anchors"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     label: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     size_mm: Mapped[int] = mapped_column(Integer, nullable=False)
-    world_pos: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    world_pos: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
