@@ -1,21 +1,30 @@
 import { useGLTF } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
-import { useLayoutEffect, useMemo, useRef } from "react";
-import type { Material, Object3D } from "three";
+import { useLayoutEffect, useMemo } from "react";
+import type { Material, Object3D, Texture } from "three";
 import { Box3, Mesh, Vector3 } from "three";
 import type { GLTF } from "three-stdlib";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 
 import { ARTWORK_MODEL_URL } from "./artworkUrl";
 
+/**
+ * Queue the glTF fetch. Called by the mode-B screen component on mount
+ * — intentionally not a module top-level side effect, so importing this
+ * module (e.g., because react-router's code-split chunk gets pre-parsed)
+ * doesn't itself trigger a ~10 MB download before the user visits Mode B.
+ */
+export function preloadArtwork(): void {
+  useGLTF.preload(ARTWORK_MODEL_URL);
+}
+
 type Props = {
   /** Multiplier on the longest bbox axis when placing the camera. 1 = snug,
    *  higher = more margin. Defaults to 1.8 — comfortable framing. */
   framing?: number;
-  /** Called once the cloned scene is mounted and the camera-fit pass has
-   *  run. Lets the host (e.g. B2Viewer) drop its DOM-space loading
-   *  overlay — Suspense alone can't signal completion to siblings outside
-   *  the Canvas. */
+  /** Fires once after the cloned scene is recentered and the camera has
+   *  been framed — i.e. the first render with the artwork actually visible.
+   *  Used by B2Viewer to hide its DOM-space "載入中…" overlay. */
   onReady?: () => void;
 };
 
@@ -29,13 +38,11 @@ type Props = {
  * pull the camera back along +Z to frame the whole piece and pin the
  * controls target to the origin.
  *
- * On unmount we dispose the cloned geometry and materials (but NOT
- * textures — Material.clone() is shallow and the cloned material's texture
- * properties still point at the same Texture objects in drei's useGLTF
- * cache; disposing them here would black-screen the second visit to /b).
- * drei's `useGLTF` cache owns the raw glTF buffers and their textures, so
- * only the per-mount geometry / material objects are released here.
- * Without this a user bouncing in and out of `/b` leaks GPU memory.
+ * On unmount we dispose the cloned geometry / materials / textures;
+ * drei's `useGLTF` cache still owns the raw glTF buffers, so only the
+ * per-mount copy is released. Without this a user bouncing in and out
+ * of `/b` leaks GPU memory (frontend.md: "Dispose geometry/material/
+ * texture on unmount — else GPU leak").
  */
 export function ArtworkModel({ framing = 1.8, onReady }: Props = {}) {
   // drei's useGLTF overload returns `(GLTF & ObjectMap) | (GLTF & ObjectMap)[]`
@@ -82,43 +89,28 @@ export function ArtworkModel({ framing = 1.8, onReady }: Props = {}) {
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
 
-    // On the very first mount `controls` is still null — drei's
-    // <OrbitControls makeDefault> registers itself in the R3F store via a
-    // useEffect, which runs after this sibling useLayoutEffect. That's
-    // fine: OrbitControls' default target is already (0,0,0). On fitKey
-    // remounts the controls instance exists, so the explicit set keeps a
-    // user-panned target from surviving a reset.
     if (controls) {
       controls.target.set(0, 0, 0);
       controls.update();
     }
 
-    // Signal the host that the model has loaded and the camera-fit pass
-    // has run, so any DOM-space loading overlay can hide. Fires every
-    // time the fit pass reruns (remount via `fitKey`, framing change),
-    // which is what the host wants — a reset implicitly means "ready
-    // again".
     onReady?.();
   }, [scene, camera, controls, framing, onReady]);
 
-  // Dispose the cloned GPU resources when the component unmounts. The
-  // ref indirection (instead of closing over `scene` with empty deps +
-  // eslint-disable) means the cleanup always reads the *latest* clone —
-  // so if ARTWORK_MODEL_URL ever becomes a prop and `scene` can change
-  // mid-mount, this disposes the right one instead of silently leaking
-  // GPU memory. Today the URL is a module-level const
-  // (src/lib/3d/artworkUrl.ts) and the ref only ever holds one value.
-  const sceneRef = useRef(scene);
-  sceneRef.current = scene;
+  // Dispose the cloned GPU resources when the component unmounts.
+  // Runs once per mount (empty deps); by that time `scene` is stable
+  // for this lifetime because `useMemo` above only reruns when the
+  // source glTF changes (which coincides with a remount anyway).
   useLayoutEffect(() => {
     return () => {
-      sceneRef.current.traverse((node) => {
+      scene.traverse((node) => {
         if (node instanceof Mesh) {
           node.geometry?.dispose();
           disposeMaterial(node.material);
         }
       });
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return <primitive object={scene} />;
@@ -135,14 +127,28 @@ function cloneMaterial(material: Material | Material[]): Material | Material[] {
   return material.clone();
 }
 
-// Material.clone() is a shallow clone — texture properties on the cloned
-// material still reference the same Texture objects that drei's useGLTF
-// cache holds. Calling texture.dispose() here would destroy those shared
-// references; the second visit to /b would get back the same (now-invalid)
-// textures and render the model fully black. Only dispose the material
-// object itself; drei's cache manages texture lifetimes.
 function disposeMaterial(material: Material | Material[]): void {
-  const dispose = (m: Material): void => m.dispose();
+  const dispose = (m: Material): void => {
+    // Dispose textures the material references. Same caveat: drei owns
+    // the source textures via its cache and will dispose them when the
+    // cached glTF entry is evicted, so disposing here only hurts if we
+    // share a texture with the original — which we don't, because
+    // `m` is a clone.
+    for (const key in m) {
+      const value = (m as unknown as Record<string, unknown>)[key];
+      if (isTexture(value)) value.dispose();
+    }
+    m.dispose();
+  };
   if (Array.isArray(material)) material.forEach(dispose);
   else dispose(material);
+}
+
+function isTexture(value: unknown): value is Texture {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    // Texture has a `.isTexture` discriminator from three.js.
+    (value as { isTexture?: boolean }).isTexture === true
+  );
 }

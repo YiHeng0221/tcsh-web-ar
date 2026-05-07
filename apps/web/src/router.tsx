@@ -85,7 +85,12 @@ export const router = createBrowserRouter([
     ),
   },
 
-  { path: "/_studio/:token", element: <ModeCRoot /> },
+  // Mode B / Mode C shells still on their own. Internal routing lands
+  // with the mode-specific issues (#18–#22, #23–#29).
+  { path: "/b", element: <ModeBRoot /> },
+  // Mode C lives at /_studio/:token/* — the splat lets ModeCRoot mount
+  // its own sub-router for C1 login + C2/C3/C5 admin screens.
+  { path: "/_studio/:token/*", element: <ModeCRoot /> },
   { path: "/_studio", element: <Navigate to="/" replace /> },
 
   { path: "*", element: <NotFound /> },
