@@ -22,6 +22,11 @@ type Props = {
   /** Multiplier on the longest bbox axis when placing the camera. 1 = snug,
    *  higher = more margin. Defaults to 1.8 — comfortable framing. */
   framing?: number;
+  /** Called once the cloned scene is mounted and the camera-fit pass has
+   *  run. Lets the host (e.g. B2Viewer) drop its DOM-space loading
+   *  overlay — Suspense alone can't signal completion to siblings outside
+   *  the Canvas. */
+  onReady?: () => void;
 };
 
 /**
@@ -40,7 +45,7 @@ type Props = {
  * of `/b` leaks GPU memory (frontend.md: "Dispose geometry/material/
  * texture on unmount — else GPU leak").
  */
-export function ArtworkModel({ framing = 1.8 }: Props = {}) {
+export function ArtworkModel({ framing = 1.8, onReady }: Props = {}) {
   // drei's useGLTF overload returns `(GLTF & ObjectMap) | (GLTF & ObjectMap)[]`
   // so narrow to the single-URL shape — TS can't prove the union itself.
   const gltf = useGLTF(ARTWORK_MODEL_URL) as GLTF;
@@ -89,7 +94,14 @@ export function ArtworkModel({ framing = 1.8 }: Props = {}) {
       controls.target.set(0, 0, 0);
       controls.update();
     }
-  }, [scene, camera, controls, framing]);
+
+    // Signal the host that the model has loaded and the camera-fit pass
+    // has run, so any DOM-space loading overlay can hide. Fires every
+    // time the fit pass reruns (remount via `fitKey`, framing change),
+    // which is what the host wants — a reset implicitly means "ready
+    // again".
+    onReady?.();
+  }, [scene, camera, controls, framing, onReady]);
 
   // Dispose the cloned GPU resources when the component unmounts.
   // Runs once per mount (empty deps); by that time `scene` is stable

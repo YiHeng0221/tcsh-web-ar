@@ -46,6 +46,7 @@ export class ModelErrorBoundary extends Component<Props, State> {
           <button
             type="button"
             onClick={this.handleRetry}
+            data-testid="mode-b-model-retry"
             className="mt-2 rounded-full border border-white/30 bg-white/10 px-6 py-2 text-sm text-fg backdrop-blur-md"
           >
             重試

@@ -1,9 +1,9 @@
 import { OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ArtworkModel, preloadArtwork } from "@/lib/3d/ArtworkModel";
+import { ArtworkModel } from "@/lib/3d/ArtworkModel";
 import { ModelErrorBoundary } from "@/lib/3d/ModelErrorBoundary";
 
 /**
@@ -23,17 +23,23 @@ export default function B2Viewer() {
   // Bumping this key remounts ArtworkModel, which re-runs its recentre +
   // camera-fit effect. Cheaper than threading a framing API through props.
   const [fitKey, setFitKey] = useState(0);
+  // Ready-flag wired into <ArtworkModel onReady />. Drives LoadingOverlay
+  // visibility — without this the overlay had no path back to hidden and
+  // stayed on top of the canvas forever once the 300ms delay elapsed.
+  const [modelReady, setModelReady] = useState(false);
 
-  useEffect(() => {
-    // Preload only when the viewer actually mounts. Module-level preload
-    // would download ~10 MB every time any Mode A / landing route opens
-    // because router's code-split chunk pre-parses imports.
-    preloadArtwork();
-  }, []);
+  // Router's lazy chunk + <ArtworkModel>'s own `useGLTF(URL)` already
+  // trigger the fetch via Suspense before any effect runs here, so a
+  // useEffect calling `useGLTF.preload` would be a no-op (the cache entry
+  // exists by the time effects fire). Drop the dead preload effect.
 
   useEffect(() => {
     const seen = localStorage.getItem(GESTURE_HINTS_KEY) === "1";
     setHintsVisible(!seen);
+  }, []);
+
+  const handleModelReady = useCallback(() => {
+    setModelReady(true);
   }, []);
 
   function dismissHints() {
@@ -47,6 +53,10 @@ export default function B2Viewer() {
   }
 
   function resetView() {
+    // Remount ArtworkModel. Flip ready back to false so LoadingOverlay can
+    // re-arm; the new mount's useLayoutEffect will call onReady again once
+    // the camera-fit pass completes.
+    setModelReady(false);
     setFitKey((n) => n + 1);
   }
 
@@ -74,7 +84,7 @@ export default function B2Viewer() {
             <directionalLight position={[-4, 2, -4]} intensity={0.3} />
 
             <Suspense fallback={null}>
-              <ArtworkModel key={fitKey} />
+              <ArtworkModel key={fitKey} onReady={handleModelReady} />
             </Suspense>
 
             {/* Distance bounds wide open — ArtworkModel sets the right
@@ -92,9 +102,10 @@ export default function B2Viewer() {
 
         {/* DOM-space loading fallback — the in-canvas Suspense renders
             nothing (a 3D spinner would flash inside the dark canvas
-            before unmounting), so the "載入中…" text lives out here and
-            hides itself once ArtworkModel signals ready through fitKey. */}
-        <LoadingOverlay />
+            before unmounting), so the "載入中…" text lives out here.
+            Hides as soon as <ArtworkModel onReady> fires; the 300ms
+            delay still suppresses the flash on fast loads. */}
+        <LoadingOverlay ready={modelReady} />
 
         {hintsVisible && <GestureHints onDismiss={dismissHints} />}
       </div>
@@ -107,15 +118,17 @@ export default function B2Viewer() {
 const GESTURE_HINTS_KEY = "tcsh:mode-b:gesture-hints-seen";
 
 // ── Loading overlay ───────────────────────────────────────────────────
-function LoadingOverlay() {
-  // Hide itself once the canvas has drawn anything. Keyed off a 0.3s
-  // delay so a fast load doesn't flash the "載入中…" on screen.
-  const [visible, setVisible] = useState(false);
+function LoadingOverlay({ ready }: { ready: boolean }) {
+  // Two gates: the 300ms `delayElapsed` suppresses a flash on fast
+  // loads, and `ready` (driven by <ArtworkModel onReady>) is the exit
+  // signal — once the model has framed itself we unmount, so the text
+  // never sticks on top of the canvas.
+  const [delayElapsed, setDelayElapsed] = useState(false);
   useEffect(() => {
-    const t = window.setTimeout(() => setVisible(true), 300);
+    const t = window.setTimeout(() => setDelayElapsed(true), 300);
     return () => window.clearTimeout(t);
   }, []);
-  if (!visible) return null;
+  if (ready || !delayElapsed) return null;
   return (
     <div
       aria-live="polite"
@@ -134,6 +147,7 @@ function TopBar({ onBack }: { onBack: () => void }) {
         type="button"
         onClick={onBack}
         aria-label="返回"
+        data-testid="mode-b-back"
         className="flex h-10 w-10 items-center justify-center text-[22px] leading-none text-fg"
       >
         ‹
@@ -167,9 +181,9 @@ function BottomToolbar({
       className="safe-area pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center pb-6"
     >
       <div className="pointer-events-auto flex h-14 w-[280px] items-center justify-around rounded-full border border-white/10 bg-white/10 text-fg backdrop-blur-md">
-        <ToolbarButton label="重置" icon="↻" onClick={onReset} />
-        <ToolbarButton label="搜尋" icon="🔍" onClick={onSearch} />
-        <ToolbarButton label="列表" icon="☰" onClick={onList} />
+        <ToolbarButton label="重置" icon="↻" onClick={onReset} testId="mode-b-reset" />
+        <ToolbarButton label="搜尋" icon="🔍" onClick={onSearch} testId="mode-b-search" />
+        <ToolbarButton label="列表" icon="☰" onClick={onList} testId="mode-b-list" />
       </div>
     </nav>
   );
@@ -179,11 +193,14 @@ function ToolbarButton({
   label,
   icon,
   onClick,
+  testId,
 }: {
   label: string;
   icon: string;
   /** Omit to disable the button (useful for B3/B4 placeholders). */
   onClick?: () => void;
+  /** Stable hook for Playwright / e2e selectors. */
+  testId?: string;
 }) {
   return (
     <button
@@ -192,6 +209,7 @@ function ToolbarButton({
       disabled={!onClick}
       className="flex h-full w-[92px] flex-col items-center justify-center gap-0.5 disabled:opacity-40"
       aria-label={label}
+      data-testid={testId}
     >
       <span className="text-lg leading-none" aria-hidden>
         {icon}
@@ -230,6 +248,7 @@ function GestureHints({ onDismiss }: { onDismiss: () => void }) {
       role="dialog"
       aria-modal="true"
       aria-label="操作提示"
+      data-testid="mode-b-gesture-hints"
       className="safe-area absolute inset-0 z-20 flex flex-col items-center justify-center gap-10 bg-black/60 backdrop-blur-[2px]"
     >
       <HintRow icons="👆 👆" label="雙指縮放" />
@@ -238,6 +257,7 @@ function GestureHints({ onDismiss }: { onDismiss: () => void }) {
         ref={confirmRef}
         type="button"
         onClick={onDismiss}
+        data-testid="mode-b-gesture-dismiss"
         className="rounded-full border border-white/30 bg-white/10 px-8 py-2 text-sm text-white backdrop-blur-md"
       >
         知道了
