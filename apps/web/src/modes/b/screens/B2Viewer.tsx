@@ -78,24 +78,37 @@ export default function B2Viewer() {
     else navigate("/", { replace: true });
   }
 
+  // Independent counter so flyToObject can re-trigger CanvasBridge without
+  // bumping `fitKey` (which is ArtworkModel's React key — bumping it would
+  // unmount the glTF, dispose its GPU resources, and re-clone the scene on
+  // every fly-to). See PR #62 AI review (MAJOR #2).
+  const [flyVersion, setFlyVersion] = useState(0);
+
   const resetView = useCallback(() => {
     flyTargetRef.current = null;
     setFitKey((n) => n + 1);
   }, []);
 
-  // Fly-to behaviour: until placements expose per-object world coordinates
-  // we approximate by placing the orbit target at a deterministic point
-  // around the artwork's centre derived from the object id. Real placement
-  // wiring (Mode C ships transforms) replaces `objectAnchorPoint` with a
-  // lookup against the placements query without touching this controller.
-  const flyToObject = useCallback((object: ARObject) => {
-    const target = objectAnchorPoint(object.id);
-    flyTargetRef.current = target;
-    // Force CanvasBridge to re-run by bumping fitKey — cheaper than a
-    // separate state slot just for the flyTo trigger, and we naturally
-    // want the model to be settled before tweening.
-    setFitKey((n) => n + 1);
+  // Fly-to behaviour. Placement-based world coordinates require backend
+  // `/placements` to populate `transform.position`, which lands with Mode C.
+  // Until then `flyToObject` is a no-op: the original PR computed a fake
+  // hash-derived position on the client, which violated frontend.md "No
+  // placement math on client — API is source of truth" and would have
+  // shipped misleading "moving camera" feedback that didn't match real
+  // object locations. See PR #62 AI review (MAJOR #3).
+  const flyToObject = useCallback((_object: ARObject) => {
+    // Reserved for the placement-driven lookup. Returning early keeps the
+    // overlay's selection flow (close-on-pick) working without lying about
+    // camera position. Once placements arrive, set `flyTargetRef.current`
+    // from `placement.transform.position` and bump `setFlyVersion`.
+    flyTargetRef.current = null;
+    setFlyVersion((n) => n + 1);
   }, []);
+
+  // Stable handler so ArtworkModel's framing effect doesn't re-fire on
+  // unrelated B2Viewer renders (e.g. opening an overlay). See PR #62 AI
+  // review (MAJOR #1).
+  const handleModelReady = useCallback(() => setModelReady(true), []);
 
   // Stable controller identity so context consumers don't re-render on
   // unrelated state changes (e.g. opening / closing the overlay).
@@ -129,7 +142,7 @@ export default function B2Viewer() {
               <directionalLight position={[-4, 2, -4]} intensity={0.3} />
 
               <Suspense fallback={null}>
-                <ArtworkModel key={fitKey} onReady={() => setModelReady(true)} />
+                <ArtworkModel key={fitKey} onReady={handleModelReady} />
               </Suspense>
 
               {/* Distance bounds wide open — ArtworkModel sets the right
@@ -144,7 +157,7 @@ export default function B2Viewer() {
                 maxDistance={10000}
               />
 
-              <CanvasBridge flyTargetRef={flyTargetRef} fitKey={fitKey} />
+              <CanvasBridge flyTargetRef={flyTargetRef} flyVersion={flyVersion} />
             </Canvas>
           </ModelErrorBoundary>
 
@@ -193,10 +206,10 @@ const GESTURE_HINTS_KEY = "tcsh:mode-b:gesture-hints-seen";
  */
 function CanvasBridge({
   flyTargetRef,
-  fitKey,
+  flyVersion,
 }: {
   flyTargetRef: React.RefObject<Vector3 | null>;
-  fitKey: number;
+  flyVersion: number;
 }) {
   const camera = useThree((s) => s.camera);
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
@@ -224,25 +237,9 @@ function CanvasBridge({
     // Single-shot — clear the request so a later resetView doesn't
     // re-apply this target.
     flyTargetRef.current = null;
-  }, [fitKey, camera, controls, flyTargetRef]);
+  }, [flyVersion, camera, controls, flyTargetRef]);
 
   return null;
-}
-
-/**
- * Deterministic "where does this object live?" helper. Until placements
- * expose true world coordinates this projects the object id onto a
- * circle around the artwork's centre at a believable height — enough to
- * make flyTo feel responsive in development. Replace with a real
- * placement lookup once Mode C populates `transform.position`.
- */
-function objectAnchorPoint(id: string): Vector3 {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-  const angle = (hash % 360) * (Math.PI / 180);
-  const radius = 0.6;
-  const height = ((hash >> 8) % 100) / 100 - 0.5; // -0.5..0.5
-  return new Vector3(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
 }
 
 // ── Loading overlay ───────────────────────────────────────────────────
@@ -307,9 +304,9 @@ function BottomToolbar({
       className="safe-area pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center pb-6"
     >
       <div className="pointer-events-auto flex h-14 w-[280px] items-center justify-around rounded-full border border-white/10 bg-white/10 text-fg backdrop-blur-md">
-        <ToolbarButton label="重置" icon="↻" onClick={onReset} />
-        <ToolbarButton label="搜尋" icon="🔍" onClick={onSearch} />
-        <ToolbarButton label="列表" icon="☰" onClick={onList} />
+        <ToolbarButton label="重置" icon="↻" onClick={onReset} testId="mode-b-toolbar-reset" />
+        <ToolbarButton label="搜尋" icon="🔍" onClick={onSearch} testId="mode-b-toolbar-search" />
+        <ToolbarButton label="列表" icon="☰" onClick={onList} testId="mode-b-toolbar-list" />
       </div>
     </nav>
   );
@@ -319,11 +316,13 @@ function ToolbarButton({
   label,
   icon,
   onClick,
+  testId,
 }: {
   label: string;
   icon: string;
   /** Omit to disable the button (useful for B3/B4 placeholders). */
   onClick?: () => void;
+  testId?: string;
 }) {
   return (
     <button
@@ -332,6 +331,7 @@ function ToolbarButton({
       disabled={!onClick}
       className="flex h-full w-[92px] flex-col items-center justify-center gap-0.5 disabled:opacity-40"
       aria-label={label}
+      data-testid={testId}
     >
       <span className="text-lg leading-none" aria-hidden>
         {icon}

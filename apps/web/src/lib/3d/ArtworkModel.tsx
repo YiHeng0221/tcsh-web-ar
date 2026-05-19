@@ -1,6 +1,6 @@
 import { useGLTF } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
-import { useLayoutEffect, useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import type { Material, Object3D, Texture } from "three";
 import { Box3, Mesh, Vector3 } from "three";
 import type { GLTF } from "three-stdlib";
@@ -68,6 +68,18 @@ export function ArtworkModel({ framing = 1.8, onReady }: Props = {}) {
   const camera = useThree((s) => s.camera);
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
 
+  // Keep the latest `onReady` callback in a ref so callers can pass an
+  // inline arrow without re-running the framing effect on every parent
+  // render. Without this, B2Viewer's `setOverlay(...)` would re-fire the
+  // effect and yank `controls.target` back to (0,0,0) — destroying any
+  // flyTo the user just performed. See PR #62 AI review (MAJOR #1).
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  // Single-shot guard so `onReady` fires exactly once per mount, matching
+  // the JSDoc contract above. Cleared on unmount because the next mount
+  // (e.g. resetView bumps fitKey) needs to fire again.
+  const firedReadyRef = useRef(false);
+
   useLayoutEffect(() => {
     const bbox = new Box3().setFromObject(scene);
     const centre = bbox.getCenter(new Vector3());
@@ -94,8 +106,14 @@ export function ArtworkModel({ framing = 1.8, onReady }: Props = {}) {
       controls.update();
     }
 
-    onReady?.();
-  }, [scene, camera, controls, framing, onReady]);
+    if (!firedReadyRef.current) {
+      firedReadyRef.current = true;
+      onReadyRef.current?.();
+    }
+    // `onReady` is intentionally read via ref to keep this effect stable
+    // across parent renders — see the comment on `onReadyRef` above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene, camera, controls, framing]);
 
   // Dispose the cloned GPU resources when the component unmounts.
   // Runs once per mount (empty deps); by that time `scene` is stable

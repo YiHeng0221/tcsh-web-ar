@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ObjectListItem } from "@/modes/b/components/ObjectListItem";
@@ -10,10 +10,12 @@ import type { ARObject } from "@/lib/api";
 /**
  * B4 · Object List (issue #21).
  *
- * Full inventory of artwork objects, grouped by leading letter section
- * to match the Figma — the "A" pill chip in the mockup is the section
- * header for the alphabetical grouping. Mobile / tablet-portrait render
- * a single column; tablet-landscape renders a 2-column grid.
+ * Full inventory of artwork objects. Mobile / tablet-portrait render a
+ * single column; tablet-landscape renders a 2-column grid. Real
+ * leading-letter section grouping (matching the Figma "A" pill) is
+ * deferred until the backend ships a `short_code` field — the prior
+ * hard-coded "A" chip was misleading because the list isn't actually
+ * grouped. See PR #62 AI review (MINOR #5).
  *
  * Selection delegates to the same `ViewerController` as B3 — picking an
  * object flies the camera and dismisses the list overlay.
@@ -53,18 +55,22 @@ export default function B4List({ onClose }: Props = {}) {
     return indexed.map(({ object }, index) => ({ object, index }));
   }, [objects, sortMode, stationByObjectId]);
 
-  function handleClose() {
+  const handleClose = useCallback(() => {
     if (onClose) onClose();
     else if (window.history.length > 1) navigate(-1);
     else navigate("/b", { replace: true });
-  }
+  }, [onClose, navigate]);
 
-  function handleSelect(object: ARObject) {
-    controller?.flyToObject(object);
-    handleClose();
-  }
+  const handleSelect = useCallback(
+    (object: ARObject) => {
+      controller?.flyToObject(object);
+      handleClose();
+    },
+    [controller, handleClose],
+  );
 
-  // Esc closes — same convention as B3.
+  // Esc closes — same convention as B3. `handleClose` is stabilised via
+  // `useCallback` above so we can safely include it in deps.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -74,8 +80,7 @@ export default function B4List({ onClose }: Props = {}) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [handleClose]);
 
   const totalLabel = `${sorted.length} 項`;
   const isTwoColumn = layout === "tablet-landscape";
@@ -133,6 +138,7 @@ function Header({
         type="button"
         onClick={onClose}
         aria-label="關閉"
+        data-testid="mode-b-overlay-close"
         className="flex h-10 w-10 items-center justify-center text-2xl leading-none text-a1-ink"
       >
         ✕
@@ -190,6 +196,7 @@ function SortMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
+        data-testid="mode-b-list-sort-toggle"
         className="flex h-10 items-center gap-1 px-2 text-sm text-a1-ink"
       >
         排序<span aria-hidden className="text-xs text-a1-caption">▼</span>
@@ -209,6 +216,7 @@ function SortMenu({
                   onChange(m);
                   setOpen(false);
                 }}
+                data-testid={`mode-b-list-sort-${m}`}
                 className={
                   "block w-full px-4 py-2.5 text-left text-sm hover:bg-black/[0.03] " +
                   (m === mode ? "font-medium text-a1-ink" : "text-a1-ink-soft")
@@ -283,28 +291,25 @@ function ListBody({
     );
   }
 
-  // Single-column layout: section pill (matches the "A" chip in Figma)
-  // followed by a divided row list.
+  // Single-column layout. The Figma shows a section pill ("A") above the
+  // list, but the underlying data isn't actually grouped — the old code
+  // hard-coded the pill which would have shown the same "A" label
+  // regardless of sort mode or content. Pill is removed until a backend
+  // `short_code` makes real grouping meaningful. See PR #62 AI review
+  // (MINOR #5).
   return (
-    <>
-      <div className="px-4 pb-3">
-        <span className="inline-flex h-9 items-center rounded-full bg-a1-hairline px-4 text-sm font-medium text-a1-ink">
-          A
-        </span>
-      </div>
-      <ul className="divide-y divide-a1-hairline">
-        {sorted.map(({ object, index }) => (
-          <li key={object.id}>
-            <ObjectListItem
-              object={object}
-              index={index}
-              stationLabel={stationByObjectId.get(object.id)}
-              onSelect={onSelect}
-            />
-          </li>
-        ))}
-      </ul>
-    </>
+    <ul className="divide-y divide-a1-hairline">
+      {sorted.map(({ object, index }) => (
+        <li key={object.id}>
+          <ObjectListItem
+            object={object}
+            index={index}
+            stationLabel={stationByObjectId.get(object.id)}
+            onSelect={onSelect}
+          />
+        </li>
+      ))}
+    </ul>
   );
 }
 

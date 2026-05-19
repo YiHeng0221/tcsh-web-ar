@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 import { apiGet } from "@/lib/api/client";
 import type { Anchor, ARObject, Placement } from "@/lib/api";
@@ -48,6 +48,27 @@ export function useObjectsWithStations() {
     }
     return map;
   }, [anchorsQuery.data, placementsQuery.data]);
+
+  // Anchors / placements are decorative — they only populate the station
+  // label on each row, so a failure shouldn't block the list. But silent
+  // failure makes "why are station labels missing in prod?" untraceable,
+  // so log when one of them goes red. See PR #62 AI review (nit #8).
+  useEffect(() => {
+    if (anchorsQuery.error) {
+      console.warn(
+        "[useObjectsWithStations] /anchors fetch failed; station labels hidden",
+        anchorsQuery.error,
+      );
+    }
+  }, [anchorsQuery.error]);
+  useEffect(() => {
+    if (placementsQuery.error) {
+      console.warn(
+        "[useObjectsWithStations] /placements fetch failed; station labels hidden",
+        placementsQuery.error,
+      );
+    }
+  }, [placementsQuery.error]);
 
   return {
     objects: objectsQuery.data ?? [],

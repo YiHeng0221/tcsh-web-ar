@@ -46,6 +46,8 @@ export function ObjectListItem({
       onClick={() => onSelect(object)}
       className={containerClass}
       aria-label={`${code} ${label}${stationLabel ? `（${stationLabel}）` : ""}`}
+      data-testid="mode-b-object-row"
+      data-object-id={object.id}
     >
       <span
         aria-hidden

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ObjectListItem } from "@/modes/b/components/ObjectListItem";
@@ -58,16 +58,19 @@ export default function B3Search({ onClose }: Props = {}) {
     });
   }, [objects, query]);
 
-  function handleClose() {
+  const handleClose = useCallback(() => {
     if (onClose) onClose();
     else if (window.history.length > 1) navigate(-1);
     else navigate("/b", { replace: true });
-  }
+  }, [onClose, navigate]);
 
-  function handleSelect(object: ARObject) {
-    controller?.flyToObject(object);
-    handleClose();
-  }
+  const handleSelect = useCallback(
+    (object: ARObject) => {
+      controller?.flyToObject(object);
+      handleClose();
+    },
+    [controller, handleClose],
+  );
 
   // Auto-focus the input on mount; the on-screen keyboard popping up is
   // expected for a search overlay. Skip the autofocus on tablet-landscape
@@ -78,7 +81,9 @@ export default function B3Search({ onClose }: Props = {}) {
     inputRef.current?.focus();
   }, [layout]);
 
-  // Esc dismisses on every layout — overlay convention.
+  // Esc dismisses on every layout — overlay convention. `handleClose` is
+  // stabilised via `useCallback` above so this listener doesn't churn on
+  // every keystroke but still picks up onClose/navigate identity changes.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -88,10 +93,7 @@ export default function B3Search({ onClose }: Props = {}) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // handleClose is stable enough — depends only on navigate / onClose
-    // identity. Re-binding on every keystroke is wasted work.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [handleClose]);
 
   const body = (
     <SearchBody
@@ -194,6 +196,7 @@ function SearchBody({
           type="button"
           onClick={onClose}
           aria-label="關閉"
+          data-testid="mode-b-overlay-close"
           className="flex h-10 w-10 items-center justify-center text-2xl leading-none text-a1-ink"
         >
           ✕
@@ -221,6 +224,7 @@ function SearchBody({
             spellCheck={false}
             enterKeyHint="search"
             aria-label="搜尋物件名稱或編號"
+            data-testid="mode-b-search-input"
             className="flex-1 bg-transparent text-base text-a1-ink placeholder:text-a1-caption focus:outline-none"
           />
           {query && (
@@ -228,6 +232,7 @@ function SearchBody({
               type="button"
               onClick={() => onQuery("")}
               aria-label="清除搜尋"
+              data-testid="mode-b-search-clear"
               className="text-sm text-a1-caption hover:text-a1-ink"
             >
               ✕
