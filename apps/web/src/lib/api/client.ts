@@ -152,13 +152,11 @@ async function request<T>(
 
 export const apiGet = <T>(path: string, opts?: RequestOptions) =>
   request<T>("GET", path, undefined, opts);
+// `skipAuth` is opt-in at the call site (see `signIn`) — a path-based
+// default would silently misfire if `/auth/refresh` or a different
+// prefix landed later.
 export const apiPost = <T>(path: string, body: unknown, opts?: RequestOptions) =>
-  // The login endpoint opts out of auth via skipAuth; everything else gets
-  // the Authorization header attached automatically.
-  request<T>("POST", path, body, {
-    ...opts,
-    skipAuth: opts?.skipAuth ?? path === "/auth/login",
-  });
+  request<T>("POST", path, body, opts);
 export const apiPatch = <T>(path: string, body: unknown, opts?: RequestOptions) =>
   request<T>("PATCH", path, body, opts);
 export const apiDelete = (path: string, opts?: RequestOptions) =>

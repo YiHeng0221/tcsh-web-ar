@@ -10,11 +10,12 @@ import {
   LineBasicMaterial,
   LineSegments,
   Raycaster,
+  Texture as ThreeTexture,
   TextureLoader,
   Vector2,
 } from "three";
 
-import { ArtworkModel, preloadArtwork } from "@/lib/3d/ArtworkModel";
+import { ArtworkModel, queueArtworkPreload } from "@/lib/3d/ArtworkModel";
 import { ModelErrorBoundary } from "@/lib/3d/ModelErrorBoundary";
 import type { Placement, Vec3 } from "@/lib/api";
 
@@ -69,19 +70,34 @@ function PlacementMarker({
   // drei's `useTexture` here because (a) the URL might be missing
   // (placement with no texture yet) and (b) we want a graceful fallback to
   // a flat colour, not a Suspense throw that crashes the canvas.
-  const textureImage = useMemo(() => {
-    if (!override?.texture && !placement.texture_id) return null;
-    const record = override?.texture;
-    if (!record) {
-      // We have a texture_id but no record (parent didn't pass one). Skip
-      // until the parent resolves it — caller is expected to supply the
-      // matching texture record via override for the selected placement.
-      return null;
+  //
+  // Lifecycle: every time the texture record id changes we load a fresh
+  // ThreeTexture and dispose the previous one on cleanup. Without the
+  // explicit dispose the GPU would leak one texture per selection switch
+  // (CLAUDE.md "Dispose geometry/material/texture on unmount — else GPU
+  // leak"). `useState` instead of `useMemo` because we need the latest
+  // value to survive cleanup of stale loads.
+  const textureRecord = override?.texture ?? null;
+  const textureRecordId = textureRecord?.id ?? null;
+  const [textureImage, setTextureImage] = useState<ThreeTexture | null>(null);
+  useEffect(() => {
+    if (!textureRecord) {
+      setTextureImage(null);
+      return;
     }
-    const tex = TEXTURE_LOADER.load(textureUrl(record));
+    let cancelled = false;
+    const tex = TEXTURE_LOADER.load(textureUrl(textureRecord));
     tex.flipY = false;
-    return tex;
-  }, [override?.texture, placement.texture_id]);
+    if (!cancelled) setTextureImage(tex);
+    return () => {
+      cancelled = true;
+      tex.dispose();
+    };
+    // We only care about the texture identity, not the record reference —
+    // a parent re-render that hands us the same record by value should
+    // not retrigger a fetch/dispose cycle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textureRecordId]);
 
   // A flat unlit-feeling material so admins read the texture's true colour
   // rather than the studio lighting. Emissive cyan on selection is kept
@@ -167,38 +183,60 @@ function PlacementOutline({ color = "#00e5ff" }: { color?: string }) {
   return <primitive object={lines} />;
 }
 
+/** Custom name so DimmingPass can opt out of mutating the floor mesh. */
+const STUDIO_FLOOR_NAME = "tcsh-studio-floor";
+
+/**
+ * Lazily build the 1024×1024 floor texture exactly once per page session.
+ * Promoting it to a module-level singleton means every C5 entry/exit pair
+ * reuses the same GPU texture — no per-mount CanvasTexture leak, no
+ * regen cost on remount. Lazy because the module may load in a context
+ * where `document` isn't available (tests, SSR), and we'd rather no-op
+ * than crash importing.
+ */
+let cachedStudioFloorTexture: CanvasTexture | null = null;
+function getStudioFloorTexture(): CanvasTexture | null {
+  if (cachedStudioFloorTexture) return cachedStudioFloorTexture;
+  if (typeof document === "undefined") return null;
+  const c = document.createElement("canvas");
+  c.width = c.height = 1024;
+  const ctx = c.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = "#0a0a0a";
+  ctx.fillRect(0, 0, 1024, 1024);
+  ctx.strokeStyle = "rgba(255,255,255,0.06)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 16; i++) {
+    const p = (i / 16) * 1024;
+    ctx.beginPath();
+    ctx.moveTo(p, 0);
+    ctx.lineTo(p, 1024);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, p);
+    ctx.lineTo(1024, p);
+    ctx.stroke();
+  }
+  cachedStudioFloorTexture = new CanvasTexture(c);
+  return cachedStudioFloorTexture;
+}
+
 /**
  * Floor grid drawn beneath the artwork — gives admins a sense of scale
  * when the artwork glTF hasn't loaded yet (or when we're previewing in a
- * test build with no model). Generated from a 1024×1024 canvas so it stays
- * crisp on retina displays without ballooning the bundle.
+ * test build with no model). The 1024×1024 CanvasTexture is built once
+ * at module level (`getStudioFloorTexture`), so admin in/out of C5
+ * doesn't accumulate GPU resources.
  */
 function StudioFloor() {
-  const texture = useMemo(() => {
-    const c = document.createElement("canvas");
-    c.width = c.height = 1024;
-    const ctx = c.getContext("2d");
-    if (!ctx) return null;
-    ctx.fillStyle = "#0a0a0a";
-    ctx.fillRect(0, 0, 1024, 1024);
-    ctx.strokeStyle = "rgba(255,255,255,0.06)";
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 16; i++) {
-      const p = (i / 16) * 1024;
-      ctx.beginPath();
-      ctx.moveTo(p, 0);
-      ctx.lineTo(p, 1024);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, p);
-      ctx.lineTo(1024, p);
-      ctx.stroke();
-    }
-    return new CanvasTexture(c);
-  }, []);
-
+  const texture = useMemo(() => getStudioFloorTexture(), []);
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.2, 0]} receiveShadow>
+    <mesh
+      name={STUDIO_FLOOR_NAME}
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, -1.2, 0]}
+      receiveShadow
+    >
       <planeGeometry args={[20, 20]} />
       <meshStandardMaterial
         color="#0a0a0a"
@@ -296,7 +334,7 @@ export function CanvasPlacementScene({
     // Same pattern as B2Viewer — keep the ~10 MB glTF preload off the
     // module top level so importing this file doesn't blow up bundles
     // that don't actually mount the editor.
-    preloadArtwork();
+    queueArtworkPreload();
   }, []);
 
   // The drop wrapper needs DOM access to compute NDC coordinates from the
@@ -523,16 +561,23 @@ function DimmingPass() {
       scene.traverse((node) => {
         // Match the Mesh check ArtworkModel uses; we look at `isMesh` to
         // avoid importing the Three Mesh class twice for a runtime check.
-        if ((node as { isMesh?: boolean }).isMesh) {
-          const mesh = node as unknown as { material: MeshStandardMaterial | MeshStandardMaterial[] };
-          const apply = (m: MeshStandardMaterial) => {
-            m.transparent = true;
-            m.opacity = 0.35;
-            m.depthWrite = false;
-          };
-          if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
-          else apply(mesh.material);
-        }
+        if (!(node as { isMesh?: boolean }).isMesh) return;
+        // Explicitly skip the placement marker cubes and the studio floor
+        // — without this filter the traverse order would silently decide
+        // which meshes get dimmed (the original code relied on the marker
+        // mounting *after* this rAF, which is fragile against Suspense /
+        // render-order changes). Names are owned by this module so future
+        // additions stay opt-out by default.
+        if (node.name === PLACEMENT_MESH_NAME) return;
+        if (node.name === STUDIO_FLOOR_NAME) return;
+        const mesh = node as unknown as { material: MeshStandardMaterial | MeshStandardMaterial[] };
+        const apply = (m: MeshStandardMaterial) => {
+          m.transparent = true;
+          m.opacity = 0.35;
+          m.depthWrite = false;
+        };
+        if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
+        else apply(mesh.material);
       });
     });
     return () => window.cancelAnimationFrame(id);

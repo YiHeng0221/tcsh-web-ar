@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { signIn } from "@/modes/c/lib/auth";
+import { InvalidCredentialsError, signIn } from "@/modes/c/lib/auth";
 
 /**
  * C1 · Login (issue #24).
@@ -42,15 +42,14 @@ export default function C1Login() {
       await signIn(values);
       // ModeCRoot picks up the auth state change; no manual nav needed.
     } catch (err) {
-      const message = err instanceof Error ? err.message : "登入失敗";
-      // The API returns `Invalid credentials` on 401; the helper rethrows
-      // that exact wording so we can match here. Anything else falls
-      // through as the raw message (network / 5xx).
-      if (/invalid (login )?credentials/i.test(message)) {
+      // Discriminate via the typed error so we don't depend on the API's
+      // 401 message text (which the backend may localise / rephrase).
+      if (err instanceof InvalidCredentialsError) {
         setSubmitError("Email 或密碼錯誤");
-      } else {
-        setSubmitError(message);
+        return;
       }
+      const message = err instanceof Error ? err.message : "登入失敗";
+      setSubmitError(message);
     }
   }
 
@@ -84,6 +83,7 @@ export default function C1Login() {
           >
             <input
               id="c1-email"
+              data-testid="mode-c-login-email"
               type="email"
               autoComplete="email"
               spellCheck={false}
@@ -101,6 +101,7 @@ export default function C1Login() {
           >
             <input
               id="c1-password"
+              data-testid="mode-c-login-password"
               type="password"
               autoComplete="current-password"
               placeholder="•••••••••"
@@ -117,6 +118,7 @@ export default function C1Login() {
 
           <button
             type="submit"
+            data-testid="mode-c-login-submit"
             disabled={isSubmitting}
             className="mt-6 h-11 w-full rounded-md bg-c-ink text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >

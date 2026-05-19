@@ -101,6 +101,7 @@ function AdminTopNav({
           <>
             <button
               type="button"
+              data-testid="mode-c-back"
               onClick={handleBack}
               className="flex h-9 w-9 items-center justify-center rounded-md text-[18px] leading-none text-c-ink hover:bg-c-hover"
               aria-label="返回"
@@ -123,6 +124,7 @@ function AdminTopNav({
             <span className="text-sm text-c-muted">{email ?? ""}</span>
             <button
               type="button"
+              data-testid="mode-c-signout"
               onClick={handleSignOut}
               disabled={signingOut}
               className="text-sm text-c-ink hover:text-c-ink-soft disabled:opacity-50"

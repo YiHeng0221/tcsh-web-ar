@@ -91,15 +91,17 @@ export default function C5PlacementEditor() {
   // list lands. Keep the URL in sync so reloading lands on the same one.
   const selectedId = params.placementId ?? placements[0]?.id ?? null;
 
+  const firstPlacementId = placements[0]?.id ?? null;
   useEffect(() => {
-    if (!params.placementId && placements.length > 0) {
-      navigate(`${studioBase}/placements/${placements[0].id}`, {
+    if (!params.placementId && firstPlacementId) {
+      navigate(`${studioBase}/placements/${firstPlacementId}`, {
         replace: true,
       });
     }
-    // Only react to placement-list landing; nav happens once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placements.length === 0 ? null : placements[0]?.id]);
+    // Re-runs only when the first placement id changes (initial landing
+    // or list reorder) — re-deriving via a memoised primitive keeps the
+    // exhaustive-deps lint happy without a disable comment.
+  }, [firstPlacementId, navigate, params.placementId, studioBase]);
 
   const selectedPlacement = useMemo(
     () => placements.find((p) => p.id === selectedId) ?? null,
@@ -129,11 +131,20 @@ export default function C5PlacementEditor() {
   const [formValues, setFormValues] = useState<PlacementFormValues | null>(
     null,
   );
+  // Inline validation errors surfaced from `handleSave`. Replaces the
+  // previous `window.alert` — alerts block the main thread, are not
+  // screen-reader-friendly, and behave inconsistently across PWA / mobile
+  // contexts. We render them inside an `role="alert"` banner above the
+  // canvas so admins see them in-context.
+  const [validationErrors, setValidationErrors] = useState<string[] | null>(
+    null,
+  );
 
   // Reset form state when the selection changes (or the underlying server
   // record changes via cache invalidation).
   useEffect(() => {
     setFormValues(pristine);
+    setValidationErrors(null);
   }, [pristine]);
 
   // ── Save mutation ─────────────────────────────────────────────────
@@ -197,11 +208,12 @@ export default function C5PlacementEditor() {
     if (!formValues || !pristine || !selectedPlacement) return;
     const errors = validatePlacementForm(formValues);
     if (errors) {
-      // Keep this lo-fi for now; the C agent A's AdminShell will surface
-      // a toast layer eventually.
-      window.alert(errors.join("\n"));
+      // Inline banner instead of `window.alert` — the banner already
+      // hosts save / drop errors, so validation joins the same channel.
+      setValidationErrors(errors);
       return;
     }
+    setValidationErrors(null);
     if (shallowEqualForm(formValues, pristine)) return;
 
     const body: PlacementUpdate = {
@@ -296,20 +308,21 @@ export default function C5PlacementEditor() {
       contentClassName="mx-0 max-w-none px-0 py-0"
       actions={
         <div className="flex items-center gap-2">
+          {/* The /preview route doesn't exist in ModeCRoot yet — leaving
+              this button live would silently bounce the user back to the
+              dashboard via the wildcard. Disable until that screen ships. */}
           <button
             type="button"
-            onClick={() => {
-              if (!selectedPlacement) return;
-              navigate(
-                `${studioBase}/preview?placement=${selectedPlacement.id}`,
-              );
-            }}
-            className="rounded-md border border-c-hairline bg-c-surface px-4 py-2 text-sm text-c-ink hover:border-c-ink-soft"
+            data-testid="mode-c-placement-preview"
+            disabled
+            title="預覽畫面建置中"
+            className="cursor-not-allowed rounded-md border border-c-hairline bg-c-surface px-4 py-2 text-sm text-c-muted opacity-60"
           >
-            預覽
+            預覽（建置中）
           </button>
           <button
             type="button"
+            data-testid="mode-c-placement-save"
             onClick={handleSave}
             disabled={!dirty || saveMutation.isPending}
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
@@ -330,6 +343,20 @@ export default function C5PlacementEditor() {
             className="border-b border-danger/40 bg-danger/10 px-6 py-3 text-sm text-danger"
           >
             {(error as Error).message ?? "資料載入失敗"}
+          </div>
+        )}
+
+        {validationErrors && validationErrors.length > 0 && (
+          <div
+            role="alert"
+            className="border-b border-danger/40 bg-danger/10 px-6 py-3 text-sm text-danger"
+          >
+            <p className="font-medium">表單驗證失敗</p>
+            <ul className="mt-1 list-disc pl-5">
+              {validationErrors.map((err) => (
+                <li key={err}>{err}</li>
+              ))}
+            </ul>
           </div>
         )}
 
@@ -389,20 +416,14 @@ export default function C5PlacementEditor() {
               anchors={anchors}
               textures={textures}
               onChange={setFormValues}
-              onChangeTexture={() => {
-                // Until the C3 picker dialog lands, fall back to a prompt.
-                // The picker will be a controlled modal exposing
-                // `onPick(textureId)`; rewire here when it ships.
-                const next = window.prompt(
-                  "輸入 Texture ID（或留白移除）",
-                  formValues.texture_id ?? "",
-                );
-                if (next === null) return;
-                setFormValues({
-                  ...formValues,
-                  texture_id: next.trim() === "" ? null : next.trim(),
-                });
-              }}
+              // The dedicated C3 picker dialog (issue follow-up) isn't
+              // built yet. Until it ships the only realistic way to set a
+              // texture is the drag-and-drop palette at the canvas edge,
+              // so we mark the change-texture affordance as unavailable
+              // here. We pass `null` so PlacementSidebar can render a
+              // hint instead of a clickable button that asks the admin to
+              // type a UUID.
+              onChangeTexture={null}
             />
           ) : (
             <aside className="w-[360px] shrink-0 border-l border-border bg-bg p-6 text-sm text-muted">

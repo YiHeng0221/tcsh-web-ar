@@ -6,9 +6,12 @@
  * service). The shape below mirrors what `GET /textures` and
  * `POST /textures` return.
  *
- * When the OpenAPI spec lands a `TextureOut` schema, swap this for a re-export
- * from `@/lib/api`. Until then this is hand-written and must stay in sync
- * with `apps/api/src/tcsh_ar_api/textures/schemas.py`.
+ * TODO(openapi-regen): the API hasn't published a `TextureOut` schema in
+ * the generated OpenAPI yet, so this file hand-rolls the type. Once
+ * `apps/web/scripts/gen-types.sh` produces `components.schemas.TextureOut`,
+ * delete this declaration and re-export from `@/lib/api`. Hand-written
+ * duplicates of OpenAPI types violate the `Pydantic is the source of
+ * truth` rule from CLAUDE.md, so this must be tracked, not forgotten.
  */
 export type Texture = {
   id: string;

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/cn";
-import { getAccessToken } from "@/modes/c/lib/auth";
+import { clearSession, getAccessToken } from "@/modes/c/lib/auth";
 import type { Texture } from "@/modes/c/lib/textureApi";
 
 /**
@@ -155,6 +155,17 @@ export default function C4UploadDialog({ open, onClose }: C4UploadDialogProps) {
 
   const queuedCount = entries.filter((e) => e.status === "queued").length;
   const allDone = entries.length > 0 && entries.every((e) => e.status === "done");
+  // Footer summary. The per-row reducer never bubbles failure to
+  // `uploadAll.isError` (each error is caught + written to the row state),
+  // so the only way to surface "X failed" to the admin is to derive it
+  // from the row statuses ourselves once at least one row has reached a
+  // terminal state.
+  const succeededCount = entries.filter((e) => e.status === "done").length;
+  const failedCount = entries.filter((e) => e.status === "error").length;
+  const summary =
+    succeededCount + failedCount > 0
+      ? { succeeded: succeededCount, failed: failedCount }
+      : null;
 
   if (!open) return null;
 
@@ -190,6 +201,7 @@ export default function C4UploadDialog({ open, onClose }: C4UploadDialogProps) {
         <div className="flex-1 overflow-y-auto px-7 py-5">
           <button
             type="button"
+            data-testid="mode-c-upload-dropzone"
             onClick={() => fileInputRef.current?.click()}
             onDragOver={(e) => {
               e.preventDefault();
@@ -250,25 +262,46 @@ export default function C4UploadDialog({ open, onClose }: C4UploadDialogProps) {
         </div>
 
         <footer className="flex items-center justify-between border-t border-c-hairline px-7 py-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-sm text-c-muted hover:text-c-ink"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={() => uploadAll.mutate()}
-            disabled={uploadAll.isPending || queuedCount === 0}
-            className="h-10 rounded-md bg-c-ink px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {uploadAll.isPending
-              ? "上傳中…"
-              : allDone
-                ? "完成"
-                : `開始上傳${queuedCount > 0 ? ` (${queuedCount})` : ""}`}
-          </button>
+          {/* Aggregate result so the user doesn't have to scan each row to
+              know whether the batch succeeded — fixes the "5 in, 4 failed,
+              footer shows 完成" UX hole from the previous implementation. */}
+          {summary ? (
+            <span
+              data-testid="mode-c-upload-summary"
+              className={cn(
+                "text-xs",
+                summary.failed > 0 ? "text-danger" : "text-c-muted",
+              )}
+              role={summary.failed > 0 ? "alert" : undefined}
+            >
+              {summary.succeeded} 個成功 / {summary.failed} 個失敗
+            </span>
+          ) : (
+            <span />
+          )}
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              data-testid="mode-c-upload-cancel"
+              onClick={onClose}
+              className="text-sm text-c-muted hover:text-c-ink"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              data-testid="mode-c-upload-start"
+              onClick={() => uploadAll.mutate()}
+              disabled={uploadAll.isPending || queuedCount === 0}
+              className="h-10 rounded-md bg-c-ink px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {uploadAll.isPending
+                ? "上傳中…"
+                : allDone
+                  ? "完成"
+                  : `開始上傳${queuedCount > 0 ? ` (${queuedCount})` : ""}`}
+            </button>
+          </div>
         </footer>
       </div>
     </div>
@@ -401,6 +434,12 @@ function uploadTexture(
       } catch {
         // non-JSON body — keep statusText
       }
+      // Mirror the JSON `client.ts` 401 behaviour so a token that expired
+      // *during* an upload still kicks the admin back to C1 instead of
+      // leaving a zombie session in localStorage. The XHR path bypasses
+      // `request()`, so without this the global 401 → clearSession ladder
+      // wouldn't run for upload-only flows.
+      if (status === 401) clearSession();
       reject(new ApiError(status, `${status} ${message}`, detail));
     };
     xhr.onerror = () => reject(new ApiError(0, "網路錯誤"));

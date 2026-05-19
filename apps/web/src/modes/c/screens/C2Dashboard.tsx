@@ -49,6 +49,10 @@ export default function C2Dashboard() {
 
   const studioBase = `/_studio/${token ?? ""}`;
 
+  // The `/preview` and dedicated `/anchors` screens haven't shipped yet —
+  // disable rather than no-op to ground the affordance honestly. The
+  // anchors button doubles as a placement editor entrypoint right now
+  // (ModeCRoot reuses C5 for that route) so we rename it accordingly.
   const actions: QuickAction[] = [
     {
       icon: "🧱",
@@ -60,8 +64,17 @@ export default function C2Dashboard() {
       label: "編輯 placement",
       onClick: () => navigate(`${studioBase}/placements`),
     },
-    { icon: "📍", label: "管理 anchor", onClick: () => navigate(`${studioBase}/anchors`) },
-    { icon: "👀", label: "預覽 Mode A / B", onClick: () => navigate(`${studioBase}/preview`) },
+    {
+      icon: "📍",
+      label: "管理 anchor（暫用 placement 編輯器）",
+      onClick: () => navigate(`${studioBase}/anchors`),
+    },
+    {
+      icon: "👀",
+      label: "預覽 Mode A / B（建置中）",
+      onClick: () => {},
+      disabled: true,
+    },
   ];
 
   return (
@@ -105,9 +118,12 @@ export default function C2Dashboard() {
                 <button
                   type="button"
                   onClick={a.onClick}
+                  disabled={a.disabled}
                   className={cn(
                     "flex w-full items-center justify-between px-5 py-4 text-left text-sm text-c-ink hover:bg-c-hover",
                     i > 0 && "border-t border-c-hairline",
+                    a.disabled &&
+                      "cursor-not-allowed text-c-muted hover:bg-transparent",
                   )}
                 >
                   <span className="flex items-center gap-3">
@@ -203,4 +219,9 @@ const PLACEHOLDER_ACTIVITY: Activity[] = Array.from({ length: 5 }, () => ({
   text: "載入中…",
 }));
 
-type QuickAction = { icon: string; label: string; onClick: () => void };
+type QuickAction = {
+  icon: string;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+};

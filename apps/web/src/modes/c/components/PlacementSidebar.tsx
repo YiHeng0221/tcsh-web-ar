@@ -136,9 +136,14 @@ type Props = {
   anchors: Anchor[];
   textures: Texture[];
   onChange: (next: PlacementFormValues) => void;
-  /** Called when the admin clicks 更換. Hooks into the C3 texture library
-   *  (when wired up); for now the editor screen passes a no-op stub. */
-  onChangeTexture: () => void;
+  /**
+   * Called when the admin clicks 更換. Hooks into the C3 texture-library
+   * picker dialog once it ships. Pass `null` to surface a "use the
+   * palette" hint instead of a clickable button — that keeps the affordance
+   * honest while the picker is in-flight (previous behaviour fell back to
+   * a `window.prompt` that asked admins to paste a UUID).
+   */
+  onChangeTexture: (() => void) | null;
 };
 
 /**
@@ -291,13 +296,19 @@ export function PlacementSidebar({
               <span className="text-[10px] text-muted">無材質</span>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onChangeTexture}
-            className="rounded-md border border-border bg-surface px-4 py-2 text-sm text-fg transition-colors hover:border-fg"
-          >
-            更換
-          </button>
+          {onChangeTexture ? (
+            <button
+              type="button"
+              onClick={onChangeTexture}
+              className="rounded-md border border-border bg-surface px-4 py-2 text-sm text-fg transition-colors hover:border-fg"
+            >
+              更換
+            </button>
+          ) : (
+            <span className="max-w-[140px] text-[11px] leading-snug text-muted">
+              拖曳左側調色盤指派
+            </span>
+          )}
         </div>
       </div>
 

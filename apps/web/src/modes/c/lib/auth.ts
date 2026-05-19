@@ -80,7 +80,15 @@ function writeSession(token: string, email: string): void {
   }
 }
 
-function clearSession(): void {
+/**
+ * Wipe the persisted session and broadcast the auth-changed event.
+ *
+ * Exported so non-`client.ts` code paths (e.g. C4's XHR upload) can hook
+ * into the same teardown the global 401 handler uses — without that,
+ * a token expiring during a multipart upload would leave a zombie session
+ * in localStorage until the next regular `apiPost` saw a 401.
+ */
+export function clearSession(): void {
   try {
     window.localStorage.removeItem(TOKEN_KEY);
     window.localStorage.removeItem(EMAIL_KEY);
@@ -111,19 +119,41 @@ export interface SignInArgs {
 }
 
 /**
+ * Sentinel error subclass surfaced when the API rejected the login as
+ * unauthorised. C1 catches this directly via `instanceof InvalidCredentialsError`
+ * instead of regex-matching error messages — message strings are not a
+ * stable contract with the backend and would silently drift if the API
+ * ever rephrases its 401 body.
+ */
+export class InvalidCredentialsError extends Error {
+  constructor(message = "Invalid login credentials") {
+    super(message);
+    this.name = "InvalidCredentialsError";
+  }
+}
+
+/**
  * Trade an email + password for a JWT and persist it. Throws on failure
  * (caller surfaces the error in the C1 form). On success the auth event
  * fires synchronously so `useAuthSession` listeners flip to `authenticated`
  * without a manual refetch.
+ *
+ * The `/auth/login` POST opts out of auto-auth via `skipAuth: true` so a
+ * stale session token never gets attached to a fresh login attempt. This
+ * also means a 401 here goes straight to InvalidCredentialsError without
+ * the global handler clobbering any other already-good session.
  */
 export async function signIn({ email, password }: SignInArgs): Promise<void> {
   let res: LoginResponse;
   try {
-    res = await apiPost<LoginResponse>("/auth/login", { email, password });
+    res = await apiPost<LoginResponse>(
+      "/auth/login",
+      { email, password },
+      { skipAuth: true },
+    );
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
-      // Match Supabase's old wording so the C1 string-matching catches it.
-      throw new Error("Invalid login credentials");
+      throw new InvalidCredentialsError();
     }
     throw err;
   }
