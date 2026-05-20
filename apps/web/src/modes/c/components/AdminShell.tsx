@@ -43,8 +43,7 @@ export default function AdminShell({
   return (
     <div
       data-mode="c"
-      className="min-h-dvh bg-c-bg text-c-ink"
-      style={{ minWidth: 1280 }}
+      className="min-h-dvh min-w-[1280px] bg-c-bg text-c-ink"
     >
       <AdminTopNav
         variant={variant}

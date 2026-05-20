@@ -85,12 +85,13 @@ function PlacementMarker({
       setTextureImage(null);
       return;
     }
-    let cancelled = false;
+    // `TEXTURE_LOADER.load()` is synchronous — it returns a `Texture` object
+    // immediately and the `cancelled` guard cannot protect against anything.
+    // Removed the dead variable; `tex.dispose()` in cleanup is still correct.
     const tex = TEXTURE_LOADER.load(textureUrl(textureRecord));
     tex.flipY = false;
-    if (!cancelled) setTextureImage(tex);
+    setTextureImage(tex);
     return () => {
-      cancelled = true;
       tex.dispose();
     };
     // We only care about the texture identity, not the record reference —

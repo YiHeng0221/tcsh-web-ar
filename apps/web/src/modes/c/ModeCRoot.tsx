@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
 import C1Login from "@/modes/c/screens/C1Login";
 import C2Dashboard from "@/modes/c/screens/C2Dashboard";
@@ -33,7 +33,6 @@ const C5PlacementEditor = lazy(() => import("@/modes/c/screens/C5PlacementEditor
 export default function ModeCRoot() {
   const { status } = useAuthSession();
   const { token } = useParams<{ token: string }>();
-  const location = useLocation();
 
   if (status === "loading") return <AuthSplash />;
   if (status === "unauthenticated") {
@@ -47,7 +46,7 @@ export default function ModeCRoot() {
   // so nested `<Routes>` matches the splat suffix.
   return (
     <Suspense fallback={<AuthSplash />}>
-      <Routes key={location.pathname}>
+      <Routes>
         <Route index element={<C2Dashboard />} />
         <Route path="textures" element={<C3TextureLibrary />} />
         <Route path="placements" element={<C5PlacementEditor />} />

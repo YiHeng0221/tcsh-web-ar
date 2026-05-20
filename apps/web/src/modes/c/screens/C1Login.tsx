@@ -57,8 +57,7 @@ export default function C1Login() {
     <div
       data-mode="c"
       data-screen="c1"
-      className="flex min-h-dvh items-center justify-center bg-c-bg px-6 text-c-ink"
-      style={{ minWidth: 1280 }}
+      className="flex min-h-dvh min-w-[1280px] items-center justify-center bg-c-bg px-6 text-c-ink"
     >
       <div className="flex w-full max-w-sm flex-col items-center">
         {/* Logo block */}

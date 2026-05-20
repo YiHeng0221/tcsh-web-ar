@@ -28,9 +28,15 @@ import { useEffect, useState } from "react";
 import { apiGet, apiPost, ApiError } from "@/lib/api/client";
 
 // ── Storage keys --------------------------------------------------------
+// Exported so `client.ts` can import the canonical values rather than
+// maintaining a hand-rolled mirror. Only constants are exported from here
+// to `client.ts` — not functions — to avoid the circular import that
+// would arise if `client.ts` pulled `clearSession()` (which calls
+// `notifyAuthChanged()`, which uses `AUTH_EVENT` from this file, which
+// imports `apiPost` from `client.ts`).
 
-const TOKEN_KEY = "tcsh.auth.token";
-const EMAIL_KEY = "tcsh.auth.email";
+export const TOKEN_KEY = "tcsh.auth.token";
+export const EMAIL_KEY = "tcsh.auth.email";
 
 // ── Wire types ---------------------------------------------------------
 
@@ -104,7 +110,9 @@ export function clearSession(): void {
 // Same-tab broadcast channel for auth state changes. The `storage` event
 // natively only fires in other tabs/windows, so we layer a CustomEvent on
 // top of it for components mounted in the same tab as signIn/signOut.
-const AUTH_EVENT = "tcsh:auth-changed";
+// Exported so `client.ts` can dispatch the same event name without a
+// hand-rolled duplicate constant.
+export const AUTH_EVENT = "tcsh:auth-changed";
 
 function notifyAuthChanged(): void {
   if (typeof window === "undefined") return;

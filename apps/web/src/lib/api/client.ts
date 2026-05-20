@@ -23,6 +23,12 @@
  * `apiPost` from here).
  */
 
+// Import only the string constants from auth.ts — not any functions —
+// to avoid the circular import that arises from auth.ts importing apiPost
+// from this file. The constants are stable primitive values; importing
+// them here means a single edit in auth.ts is enough to update both paths.
+import { AUTH_EVENT, EMAIL_KEY, TOKEN_KEY } from "@/modes/c/lib/auth";
+
 const BASE = "/api";
 
 export class ApiError extends Error {
@@ -55,12 +61,15 @@ type RequestOptions = {
   skipAuth?: boolean;
 };
 
-/** Local copy of the auth token reader to avoid an import cycle with
- *  `@/modes/c/lib/auth` (which imports apiPost from this file). */
+/**
+ * Read the persisted access token. Uses the canonical TOKEN_KEY from
+ * auth.ts to stay in sync with `getAccessToken()` — a single source of
+ * truth for the localStorage key name.
+ */
 function readAuthToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return window.localStorage.getItem("tcsh.auth.token");
+    return window.localStorage.getItem(TOKEN_KEY);
   } catch {
     return null;
   }
@@ -68,20 +77,23 @@ function readAuthToken(): string | null {
 
 /**
  * Wipe the persisted session on a 401 and notify any mounted
- * `useAuthSession` listeners. Mirrors `clearSession()` in `auth.ts` — kept
- * in sync by hand because pulling auth.ts in here would create a circular
- * import (auth.ts → apiPost → this module → auth.ts).
+ * `useAuthSession` listeners. Uses the canonical KEY / EVENT constants
+ * from auth.ts so renaming them in one place is enough — no silent drift.
+ *
+ * Note: we don't call `clearSession()` from auth.ts directly because auth.ts
+ * imports `apiPost` from this file, which would create a circular module
+ * dependency. Importing only the three string constants avoids that cycle.
  */
 function handleUnauthorized(): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem("tcsh.auth.token");
-    window.localStorage.removeItem("tcsh.auth.email");
+    window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(EMAIL_KEY);
   } catch {
     // ignore
   }
   // Same-tab signal — `useAuthSession` listens for this and re-validates.
-  window.dispatchEvent(new CustomEvent("tcsh:auth-changed"));
+  window.dispatchEvent(new CustomEvent(AUTH_EVENT));
 }
 
 async function request<T>(
