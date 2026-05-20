@@ -21,10 +21,15 @@ class LocalUser(BaseModel):
 
     There is exactly one admin, configured from settings. `is_admin` stays in
     the model so existing route deps that read `user.is_admin` keep working.
+
+    Default is ``False`` (fail-closed), matching ``verify_token``'s
+    ``claims.get("is_admin", False)`` fallback. Callers that construct a
+    ``LocalUser`` directly (e.g. tests) must pass ``is_admin=True``
+    explicitly so there's no silent privilege escalation from the default.
     """
 
     email: str
-    is_admin: bool = True
+    is_admin: bool = False
 
 
 class MeResponse(BaseModel):
