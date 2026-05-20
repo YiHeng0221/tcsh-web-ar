@@ -141,7 +141,7 @@ db-revision: ## Autogenerate a new Alembic revision (override MSG="message")
 	@if [ -z "$(MSG)" ]; then \
 	  echo "Usage: make db-revision MSG=\"describe change\""; exit 2; \
 	fi
-	cd $(API_DIR) && uv run alembic revision --autogenerate -m "$(MSG)"
+	cd $(API_DIR) && uv run alembic revision --autogenerate -m '$(MSG)'
 
 db-current: ## Show the currently applied Alembic revision
 	cd $(API_DIR) && uv run alembic current
