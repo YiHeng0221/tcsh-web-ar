@@ -75,15 +75,14 @@ jobs:
 
 ```yaml
 - uses: actions/checkout@v4
+- uses: astral-sh/setup-uv@v3
+  with:
+    version: "0.8.22"
+    enable-cache: true
+    cache-dependency-glob: apps/api/uv.lock
 - uses: actions/setup-python@v5
   with:
     python-version: "3.12"
-- uses: astral-sh/setup-uv@v3
-- name: Cache uv venv
-  uses: actions/cache@v4
-  with:
-    path: apps/api/.venv
-    key: uv-${{ runner.os }}-${{ hashFiles('apps/api/uv.lock') }}
 - run: cd apps/api && uv sync --frozen
 - run: cd apps/api && uv run ruff check src tests
 - run: cd apps/api && uv run mypy src
@@ -100,10 +99,26 @@ CI 上這個 flag 是必須的，否則 lockfile drift（pyproject 改了但忘�
 `python-version: "3.12"`。**不要寫 `"3.x"` 或讓 setup-python 自己挑**
 ——你會在某次升級 minor 時莫名其妙被拖去新版。
 
-### 快取 `.venv` 而不是 `~/.cache/uv`
-快取 venv 直接快取「裝好的東西」，重 hit 時 `uv sync --frozen` 幾乎
-是 noop。快取 uv download cache 還要再做一次 link/install，慢一些。
-key 用 `hashFiles('apps/api/uv.lock')`，lock 沒變就 100% 命中。
+### 快取策略：`setup-uv` 內建 download cache
+目前用 `astral-sh/setup-uv` 的 `enable-cache: true`，它快取的是
+`~/.cache/uv`（uv 的 download cache），key 由 `cache-dependency-glob`
+綁定到 `apps/api/uv.lock`——lock 不變就命中。
+
+實際執行時 `uv sync --frozen` 仍需完成 link/install 步驟（把 wheel 從
+cache link 進 `.venv`），所以跟「零 I/O noop」還有段差距。
+
+若想進一步加速，可在 `uv sync` 前另加 `actions/cache@v4` step 直接快取
+`apps/api/.venv`，重 hit 時 `uv sync --frozen` 幾乎是 noop（whl 已就位）：
+
+```yaml
+- name: Cache uv venv
+  uses: actions/cache@v4
+  with:
+    path: apps/api/.venv
+    key: uv-venv-${{ runner.os }}-${{ hashFiles('apps/api/uv.lock') }}
+```
+
+目前 CI 時間尚在可接受範圍，暫不加；若 `api` job 超過 60 秒再補。
 
 ### Postgres service 沒加
 原本想用 `services: postgres`，但 `apps/api/tests/auth/test_jwt_service.py`
