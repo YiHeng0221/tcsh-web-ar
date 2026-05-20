@@ -17,7 +17,7 @@ import pytest
 from tcsh_ar_api.config import Settings
 from tcsh_ar_api.textures.exceptions import FileTooLargeError, InvalidMimeError
 from tcsh_ar_api.textures.schemas import UploadURLRequest
-from tcsh_ar_api.textures.service import TextureService, _parse_token_exp
+from tcsh_ar_api.textures.service import TextureService, parse_token_exp
 from tcsh_ar_api.textures.storage import SignedUpload
 
 
@@ -96,32 +96,32 @@ async def test_size_cap_rejects_oversized_file(settings: Settings) -> None:
     storage.create_upload_url.assert_not_called()
 
 
-async def test_parse_token_exp_extracts_known_value() -> None:
+async def testparse_token_exp_extracts_known_value() -> None:
     expected = 1_750_000_000
-    assert _parse_token_exp(_make_token(expected)) == expected
+    assert parse_token_exp(_make_token(expected)) == expected
 
 
-def test_parse_token_exp_falls_back_for_non_jwt() -> None:
+def testparse_token_exp_falls_back_for_non_jwt() -> None:
     """Non-JWT-shaped strings fall back to now + 2h instead of raising."""
     before = int(time.time())
-    fallback = _parse_token_exp("not-a-jwt")
+    fallback = parse_token_exp("not-a-jwt")
     after = int(time.time())
     # Default fallback is 7200s; allow ±2s slack for assertion stability.
     assert before + 7200 - 2 <= fallback <= after + 7200 + 2
 
 
-def test_parse_token_exp_falls_back_for_jwt_without_exp() -> None:
+def testparse_token_exp_falls_back_for_jwt_without_exp() -> None:
     header = base64.urlsafe_b64encode(b'{"alg":"HS256"}').rstrip(b"=").decode()
     payload = base64.urlsafe_b64encode(b'{"sub":"abc"}').rstrip(b"=").decode()
     token = f"{header}.{payload}.sig"
 
-    fallback = _parse_token_exp(token)
+    fallback = parse_token_exp(token)
     assert fallback > int(time.time())  # at least in the future
 
 
-def test_parse_token_exp_falls_back_for_malformed_payload() -> None:
+def testparse_token_exp_falls_back_for_malformed_payload() -> None:
     """Garbage in the JWT body must not crash; the comment in the source
     promises a fallback for `(ValueError, KeyError, TypeError)`."""
     token = "header.NOT-VALID-BASE64!@#.sig"
-    fallback = _parse_token_exp(token)
+    fallback = parse_token_exp(token)
     assert fallback > int(time.time())

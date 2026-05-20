@@ -21,6 +21,7 @@ async def anchor_id(
     make_anchor_payload: Callable[..., dict[str, Any]],
 ) -> str:
     response = await client.post("/anchors", json=make_anchor_payload(label="P-Anchor"))
+    assert response.status_code == 201, response.text
     return str(response.json()["id"])
 
 
@@ -30,6 +31,7 @@ async def object_id(
     make_object_payload: Callable[..., dict[str, Any]],
 ) -> str:
     response = await client.post("/objects", json=make_object_payload(label="P-Obj"))
+    assert response.status_code == 201, response.text
     return str(response.json()["id"])
 
 

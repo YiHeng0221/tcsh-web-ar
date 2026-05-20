@@ -7,8 +7,11 @@ from typing import Any
 from unittest.mock import patch
 from uuid import uuid4
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.exc import IntegrityError
+
+from tcsh_ar_api.objects.repository import ARObjectRepository
 
 
 async def test_create_lists_and_gets_object(
@@ -156,8 +159,6 @@ async def test_unique_violation_translates_to_409(
     IntegrityError. This pins the contract: a 23505 from create() must
     surface as 409, not 500.
     """
-    from tcsh_ar_api.objects.repository import ARObjectRepository
-
     class _FakeUniqueOrig:
         sqlstate = "23505"
 
@@ -188,10 +189,6 @@ async def test_unexpected_integrity_error_is_re_raised_not_409(
     therefore not exercised by this test; it is covered by FastAPI's own test
     suite and the integration smoke test in CI.
     """
-    import pytest
-
-    from tcsh_ar_api.objects.repository import ARObjectRepository
-
     class _FakeNotNullOrig:
         sqlstate = "23502"
 
