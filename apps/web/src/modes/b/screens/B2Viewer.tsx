@@ -42,10 +42,16 @@ export default function B2Viewer() {
     setModelReady(true);
   }, []);
 
-  function dismissHints() {
+  // Wrapped in useCallback so the reference is stable across B2Viewer
+  // re-renders (e.g., when modelReady flips true). GestureHints' useEffect
+  // depends on [onDismiss] and calls confirmRef.current?.focus() — an
+  // unstable reference would re-run the effect after each parent render,
+  // stealing focus back to the "知道了" button while the user is rotating
+  // the model.
+  const dismissHints = useCallback(() => {
     localStorage.setItem(GESTURE_HINTS_KEY, "1");
     setHintsVisible(false);
-  }
+  }, []);
 
   function handleBack() {
     if (window.history.length > 1) navigate(-1);

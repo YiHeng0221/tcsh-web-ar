@@ -23,8 +23,8 @@ export class ModelErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error) {
-    // Surface in dev; prod wire-up is #33 (Sentry / similar) territory.
-    console.error("ModelErrorBoundary caught:", error);
+    // Surface in dev only; prod wire-up is #33 (Sentry / similar) territory.
+    if (import.meta.env.DEV) console.error("ModelErrorBoundary caught:", error);
   }
 
   handleRetry = () => {
