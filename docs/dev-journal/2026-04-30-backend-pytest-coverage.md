@@ -219,18 +219,15 @@ issue 討論。**
 - **沒**改 .github/（不會撞 PR #59 的 CI）
 - 加的 dev dep 只動 `apps/api/pyproject.toml` + `uv.lock`
 
-但是要注意——**`apps/api/pyproject.toml` 在 `main` 工作目錄上有未提交
-的本地修改**（Supabase → SQLite + 本地 bcrypt 遷移），因此這份 PR
-基於 `origin/main`（仍是 Supabase + asyncpg）寫成。如果那批本地遷移
-之後合進 main，這些測試需要對應調整：
+若未來 backend 從 Postgres 遷移至 SQLite，這份測試套件需要整體重寫：
 
 - `IntegrityError.orig.sqlstate` 在 SQLite 上不存在，分類器邏輯本身要重寫
 - `testcontainers[postgres]` 可能換成 in-process SQLite，testcontainers
   整段 conftest 要替換
 - Auth dep override 不變（FastAPI 行為一樣）
 
-這部分 reviewer 自己決定 merge 順序：**先合 SQLite 遷移再 rebase 這份 PR**
-比較乾淨。
+建議合併順序：**先合 SQLite 遷移再 rebase 這份 PR** 比較乾淨，可避免
+重複的 conftest 重寫成本。
 
 ---
 

@@ -1,8 +1,8 @@
 """Router-level coverage for the anchors domain.
 
 DB-backed: every test runs against the testcontainer Postgres, isolated by a
-per-test SAVEPOINT (see `tests/conftest.py`). Auth is overridden via
-`auth_state` so we exercise the role gate without minting JWTs.
+per-test TRUNCATE of mutable tables (see `tests/conftest.py`). Auth is
+overridden via `auth_state` so we exercise the role gate without minting JWTs.
 """
 
 from __future__ import annotations

@@ -8,7 +8,6 @@ session is left clean (re-usable) after a conflict.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -83,7 +82,6 @@ async def test_update_not_found(db_session: AsyncSession) -> None:
 
 async def test_delete_in_use_translates_fk_violation(
     db_session: AsyncSession,
-    seeded_texture: Any,
 ) -> None:
     """If a placement-FK ever loses ON DELETE CASCADE, deletion must surface as 409.
 
@@ -93,12 +91,6 @@ async def test_delete_in_use_translates_fk_violation(
     directly: the service must convert a 23503 into AnchorInUseError and
     leave the session usable for the next caller.
     """
-    from unittest.mock import patch
-
-    from sqlalchemy.exc import IntegrityError
-
-    from tcsh_ar_api.anchors.repository import AnchorRepository
-
     svc = _make_service(db_session)
     anchor = await svc.create(AnchorCreate(label="busy", size_mm=200, world_pos=None))
     anchor_id = anchor.id

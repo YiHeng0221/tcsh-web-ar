@@ -93,7 +93,7 @@ async def engine(database_url: str) -> AsyncIterator[Any]:
         await test_engine.dispose()
 
 
-@pytest_asyncio.fixture(loop_scope="session")
+@pytest_asyncio.fixture
 async def db_session(engine: Any) -> AsyncIterator[AsyncSession]:
     """One AsyncSession per test, isolated by truncating mutable tables on teardown.
 
@@ -116,7 +116,8 @@ async def db_session(engine: Any) -> AsyncIterator[AsyncSession]:
             yield session
         finally:
             await session.rollback()
-            # Order matters: placements FK-references everything else.
+            # CASCADE handles FK order automatically; explicit table order here
+            # is for documentation clarity only (placements → objects → anchors → textures).
             await session.execute(
                 _text(
                     "TRUNCATE TABLE placements, ar_objects, anchors, textures "
@@ -160,7 +161,7 @@ def auth_state() -> dict[str, Any]:
     return {"user": None}
 
 
-@pytest_asyncio.fixture(loop_scope="session")
+@pytest_asyncio.fixture
 async def app(
     db_session: AsyncSession,
     auth_state: dict[str, Any],
@@ -218,7 +219,7 @@ async def app(
         fastapi_app.dependency_overrides.clear()
 
 
-@pytest_asyncio.fixture(loop_scope="session")
+@pytest_asyncio.fixture
 async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -314,7 +315,7 @@ def make_placement_payload() -> Callable[..., dict[str, Any]]:
     return _build
 
 
-@pytest_asyncio.fixture(loop_scope="session")
+@pytest_asyncio.fixture
 async def seeded_texture(db_session: AsyncSession) -> Any:
     """Insert a Texture row directly so placement tests can FK-reference it.
 

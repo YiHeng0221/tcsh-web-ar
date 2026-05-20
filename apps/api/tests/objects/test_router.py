@@ -177,8 +177,16 @@ async def test_unexpected_integrity_error_is_re_raised_not_409(
 
     The router's classifier only owns 23505 (unique violation). Any other
     sqlstate must propagate unchanged so FastAPI's default handler emits
-    a real 500 (the test client is configured to re-raise server-side
-    exceptions, which lets us assert the type explicitly).
+    a real 500.
+
+    NOTE: this test uses `pytest.raises(IntegrityError)` rather than asserting
+    `response.status_code == 500`. This is because httpx's ASGITransport
+    re-raises server-side exceptions by default instead of converting them to
+    an HTTP 500 response — so we can only assert the exception type here, not
+    the HTTP contract. In production, FastAPI's default exception handler
+    converts unhandled exceptions to 500 responses. The HTTP 500 contract is
+    therefore not exercised by this test; it is covered by FastAPI's own test
+    suite and the integration smoke test in CI.
     """
     import pytest
 
