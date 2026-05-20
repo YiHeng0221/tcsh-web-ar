@@ -10,6 +10,8 @@ import mkcert from "vite-plugin-mkcert";
 // physical iPhone over LAN. See `docs/dev/https-local.md`.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
+  // loadEnv reads .env files; process.env catches shell-level VITE_HTTPS=1
+  // (e.g. `VITE_HTTPS=1 bun run dev`). Both paths need to be supported.
   const useHttps = env.VITE_HTTPS === "1" || process.env.VITE_HTTPS === "1";
 
   const plugins: PluginOption[] = [react(), tailwindcss()];
@@ -26,7 +28,11 @@ export default defineConfig(({ mode }) => {
       alias: { "@": path.resolve(__dirname, "src") },
     },
     server: {
-      host: true, // bind 0.0.0.0 so phones on the same LAN can reach us
+      // Only bind 0.0.0.0 in HTTPS mode — exposes the dev server on the LAN
+      // so iPhones can reach it for getUserMedia / DeviceOrientationEvent
+      // testing. Default HTTP mode stays localhost-only to avoid exposing
+      // the HTTP dev server (and /api proxy) on shared networks.
+      host: useHttps ? true : undefined,
       port: 5173,
       proxy: {
         "/api": {

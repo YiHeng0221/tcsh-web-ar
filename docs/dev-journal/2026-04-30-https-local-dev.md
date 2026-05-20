@@ -50,23 +50,27 @@ import mkcert from 'vite-plugin-mkcert'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const httpsEnabled = env.VITE_HTTPS === '1' || env.VITE_HTTPS === 'true'
+  // loadEnv reads .env files; process.env catches shell-level VITE_HTTPS=1
+  const useHttps = env.VITE_HTTPS === '1' || process.env.VITE_HTTPS === '1'
 
   return {
     plugins: [
       react(),
-      ...(httpsEnabled ? [mkcert()] : []),
+      ...(useHttps ? [mkcert()] : []),
     ],
     server: {
-      host: true,           // 0.0.0.0，讓 LAN 上的手機連得到
-      https: httpsEnabled ? {} : undefined,
+      // Only bind 0.0.0.0 in HTTPS mode; HTTP mode stays localhost-only
+      host: useHttps ? true : undefined,
+      port: 5173,
     },
   }
 })
 ```
 
-`host: true` = `0.0.0.0`：Vite 預設只 bind `localhost`，手機從 LAN 連會
+`host: useHttps ? true : undefined`：Vite 預設只 bind `localhost`，手機從 LAN 連會
 打不到。設成 `true` 才會在 console 印出 `Network: https://192.168.x.x:5173/`。
+**注意：** 只有 HTTPS 模式才開放 LAN，避免 HTTP dev server（含 `/api` proxy）
+在共用網路（公司、校園、咖啡廳 Wi-Fi）上暴露。
 
 ### `apps/web/.env.example`
 加上：
