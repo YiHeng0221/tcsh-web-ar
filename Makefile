@@ -85,7 +85,7 @@ test-api: ## Run pytest in apps/api
 	cd $(API_DIR) && uv run pytest
 
 test-web: ## Run JS tests via bun (vitest if present; tolerated if absent)
-	cd $(WEB_DIR) && bun test || true
+	cd $(WEB_DIR) && bun test || true  # TODO: remove || true after vitest is set up (see PR #59)
 
 # ===== Lint / Format / Typecheck =====
 
@@ -94,7 +94,7 @@ test-web: ## Run JS tests via bun (vitest if present; tolerated if absent)
 lint: lint-api lint-web ## Run ruff (api) and eslint (web)
 
 lint-api: ## Ruff check on apps/api (src + tests when present)
-	cd $(API_DIR) && uv run ruff check src tests 2>/dev/null || (cd $(API_DIR) && uv run ruff check src)
+	cd $(API_DIR) && if [ -d tests ]; then uv run ruff check src tests; else uv run ruff check src; fi
 
 lint-web: ## ESLint over apps/web/src
 	cd $(WEB_DIR) && bun run lint
