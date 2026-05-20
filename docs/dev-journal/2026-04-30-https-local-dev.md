@@ -183,9 +183,11 @@ iPhone 跟 mac 接同一個 Wi-Fi，Safari 開 `https://192.168.1.141:5173/`
 
 最簡單：在 `vite.config.ts` 開 proxy 把 `/api` 轉給後端，前端只打
 relative URL `/api/...`，這樣前端 HTTPS、proxy 內部 HTTP 都沒事。
-這個 PR **沒**動 proxy，留給後續一併處理（issue #34 API 部署 / 或新
-issue）。本 PR 只把 dev server 端 HTTPS 通了，先解 Mode A 實機測試的
-gating 問題。
+Vite 的 `/api` proxy（`/api` → `http://localhost:8000`）在此 PR 前就已
+存在並保留——這個 proxy 已正確處理 LAN → API 的 mixed-content 問題，手機
+透過 HTTPS dev server 打 `/api/...` 會走 proxy 轉給後端，不會有 mixed-
+content 阻擋。「留給後續」指的是**從手機直接繞過 proxy 打後端 IP** 的罕
+見場景（issue #34 API 部署）；常見的開發測試路徑已被 proxy 覆蓋。
 
 ---
 
