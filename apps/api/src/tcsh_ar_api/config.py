@@ -38,9 +38,18 @@ class Settings(BaseSettings):
     # one admin identity, configured via `admin_email` + `admin_password_hash`
     # (a bcrypt hash; generate with `uv run python -m tcsh_ar_api.create_admin`).
     # No user table — login compares against these env vars.
+    # Intentionally no default — callers must supply JWT_SECRET in env.
+    # In development you can set JWT_SECRET=change-me-development-only in
+    # apps/api/.env; that value is detected by lifespan and raises in
+    # non-development environments.
     jwt_secret: SecretStr = Field(
         default=SecretStr("change-me-development-only"),
-        description="HS256 signing key for issued JWTs. Rotate in production.",
+        description=(
+            "HS256 signing key for issued JWTs. Rotate in production. "
+            "The default 'change-me-development-only' is intentionally "
+            "well-known — the lifespan guard rejects this value outside "
+            "APP_ENV=development."
+        ),
     )
     admin_email: str = Field(
         default="admin@example.com",

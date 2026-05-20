@@ -16,6 +16,15 @@ class InvalidMimeError(TextureError):
     detail = "mime type not allowed"
 
 
+class EmptyFileError(TextureError):
+    # 400 Bad Request — the upload contained zero bytes, which is a distinct
+    # error from an unsupported mime type.  Separating the two lets the UI
+    # show a meaningful message ("please select a non-empty file") rather than
+    # "mime invalid".
+    status_code = 400
+    detail = "empty file"
+
+
 class FileTooLargeError(TextureError):
     # 413 Payload Too Large — same spirit.
     status_code = 413

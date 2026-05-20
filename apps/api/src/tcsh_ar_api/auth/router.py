@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from tcsh_ar_api.auth.dependencies import get_current_admin
+from tcsh_ar_api.auth.exceptions import InvalidCredentialsError
 from tcsh_ar_api.auth.schemas import LocalUser, LoginRequest, MeResponse, TokenResponse
 from tcsh_ar_api.auth.service import mint_token, verify_password
 from tcsh_ar_api.config import Settings, get_settings
@@ -31,8 +32,8 @@ async def login(
     # an attacker enumerate the admin email by clocking responses.
     if not (email_ok and password_ok):
         raise HTTPException(
-            status_code=401,
-            detail="Invalid credentials",
+            status_code=InvalidCredentialsError.status_code,
+            detail=InvalidCredentialsError.detail,
             headers=_BEARER_CHALLENGE,
         )
 

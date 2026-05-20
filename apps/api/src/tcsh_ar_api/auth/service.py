@@ -91,9 +91,12 @@ def verify_token(token: str, *, settings: Settings | None = None) -> LocalUser:
         raise InvalidTokenError(str(exc) or "invalid or expired token") from exc
 
     try:
+        # Fail-closed: missing `is_admin` claim → False, not True.
+        # `mint_token` always embeds `is_admin: True`; a token without the
+        # claim should not silently inherit admin rights.
         return LocalUser(
             email=claims.get("email") or claims["sub"],
-            is_admin=bool(claims.get("is_admin", True)),
+            is_admin=bool(claims.get("is_admin", False)),
         )
     except (KeyError, ValidationError) as exc:
         raise InvalidTokenError("malformed token claims") from exc

@@ -37,6 +37,14 @@ if _settings.database_url.startswith("sqlite"):
         _connection_record: ConnectionPoolEntry,
     ) -> None:
         cursor = dbapi_connection.cursor()
+        # Enable WAL so readers don't block writers — prevents "database is
+        # locked" under concurrent uvicorn workers or simultaneous GET + upload.
+        # NORMAL synchronous mode is safe with WAL (crash-safe, fsync at
+        # checkpoints) and significantly faster than FULL.
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        # FK enforcement is off by default in SQLite — every new connection
+        # must opt in for CASCADE / SET NULL to take effect.
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
