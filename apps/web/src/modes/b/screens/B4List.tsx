@@ -22,9 +22,9 @@ import type { ARObject } from "@/lib/api";
  */
 type SortMode = "code" | "label" | "station";
 
-type Props = {
+interface Props {
   onClose?: () => void;
-};
+}
 
 export default function B4List({ onClose }: Props = {}) {
   const layout = useBLayout();
@@ -138,7 +138,7 @@ function Header({
         type="button"
         onClick={onClose}
         aria-label="關閉"
-        data-testid="mode-b-overlay-close"
+        data-testid="mode-b-list-close"
         className="flex h-10 w-10 items-center justify-center text-2xl leading-none text-a1-ink"
       >
         ✕

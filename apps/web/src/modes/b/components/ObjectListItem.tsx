@@ -9,7 +9,7 @@ import type { ARObject } from "@/lib/api";
  * `<img>` of the texture. Keeping a stable per-id colour means the row
  * doesn't flicker as the API order changes between fetches.
  */
-type Props = {
+interface Props {
   object: ARObject;
   /** Optional anchor caption (e.g. "Station A"). Derived by the parent —
    *  B3 / B4 both have access to the placements / anchors lookup. */
@@ -22,7 +22,7 @@ type Props = {
   /** Variant: "row" (default) for B3 list / B4 mobile, "card" for B4
    *  tablet-landscape grid where the item lives in a bordered cell. */
   variant?: "row" | "card";
-};
+}
 
 export function ObjectListItem({
   object,

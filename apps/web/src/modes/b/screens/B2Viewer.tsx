@@ -197,6 +197,11 @@ export default function B2Viewer() {
 const GESTURE_HINTS_KEY = "tcsh:mode-b:gesture-hints-seen";
 
 // ── Canvas-side bridge ────────────────────────────────────────────────
+interface CanvasBridgeProps {
+  flyTargetRef: React.RefObject<Vector3 | null>;
+  flyVersion: number;
+}
+
 /**
  * Lives inside the R3F Canvas so it has direct access to `useThree` —
  * lets us imperatively update OrbitControls' target when a B3 / B4 row
@@ -204,13 +209,7 @@ const GESTURE_HINTS_KEY = "tcsh:mode-b:gesture-hints-seen";
  * a re-render every time the target updates; OrbitControls reads its
  * own target each frame.
  */
-function CanvasBridge({
-  flyTargetRef,
-  flyVersion,
-}: {
-  flyTargetRef: React.RefObject<Vector3 | null>;
-  flyVersion: number;
-}) {
+function CanvasBridge({ flyTargetRef, flyVersion }: CanvasBridgeProps) {
   const camera = useThree((s) => s.camera);
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
 

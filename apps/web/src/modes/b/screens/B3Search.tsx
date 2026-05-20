@@ -20,14 +20,14 @@ import type { ARObject } from "@/lib/api";
  * mounted) we navigate back to /b — B2 will mount and the user can search
  * again from there.
  */
-type Props = {
+interface Props {
   /**
    * Called by the host (B2Viewer) to dismiss the overlay. When the screen
    * is reached as a standalone route, omit this and we'll fall back to
    * `navigate(-1)`.
    */
   onClose?: () => void;
-};
+}
 
 export default function B3Search({ onClose }: Props = {}) {
   const layout = useBLayout();
@@ -164,7 +164,7 @@ export default function B3Search({ onClose }: Props = {}) {
 }
 
 // ── Body ────────────────────────────────────────────────────────────────
-type BodyProps = {
+interface BodyProps {
   layout: ReturnType<typeof useBLayout>;
   query: string;
   onQuery: (v: string) => void;
@@ -175,7 +175,7 @@ type BodyProps = {
   onSelect: (o: ARObject) => void;
   onClose: () => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
-};
+}
 
 function SearchBody({
   layout,
@@ -196,7 +196,7 @@ function SearchBody({
           type="button"
           onClick={onClose}
           aria-label="關閉"
-          data-testid="mode-b-overlay-close"
+          data-testid="mode-b-search-close"
           className="flex h-10 w-10 items-center justify-center text-2xl leading-none text-a1-ink"
         >
           ✕
