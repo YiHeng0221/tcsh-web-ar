@@ -85,7 +85,7 @@ jobs:
     python-version: "3.12"
 - run: cd apps/api && uv sync --frozen
 - run: cd apps/api && uv run ruff check src tests
-- run: cd apps/api && uv run mypy src
+- run: cd apps/api && uv run mypy  # target defined in pyproject.toml [tool.mypy]
 - run: cd apps/api && uv run pytest
 ```
 

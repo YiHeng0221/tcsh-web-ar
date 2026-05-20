@@ -47,6 +47,9 @@ jobs:
       - name: Install uv
         # Pin to a specific tagged release; uv ships breaking changes on
         # minor bumps occasionally and we want CI to be deterministic.
+        # Tag pin (not SHA pin) is a deliberate trade-off: no deploy steps
+        # or secrets in this workflow → supply chain blast radius is low.
+        # Re-evaluate when a deploy job or secret-dependent step lands.
         uses: astral-sh/setup-uv@v3
         with:
           version: "0.8.22"
@@ -86,6 +89,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Bun
+        # Tag pin (not SHA pin) — same deliberate trade-off as setup-uv above:
+        # no secrets/deploy in this workflow, so supply chain risk is acceptable.
+        # Revisit before adding any secret-dependent or deploy steps.
         uses: oven-sh/setup-bun@v2
         with:
           # No `packageManager` field in apps/web/package.json yet — pin
