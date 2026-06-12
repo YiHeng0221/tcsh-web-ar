@@ -97,6 +97,20 @@ export async function requestAllArPermissions(): Promise<ArPermissionsResult> {
   return { camera, orientation };
 }
 
+/**
+ * Re-arm the orientation event stream on a page load where the grant
+ * already exists. iOS quirk (field bug 2026-06-13): even with a standing
+ * grant, `deviceorientation` fires ZERO events until
+ * `requestPermission()` has been called once in the CURRENT page load.
+ * When previously granted it resolves "granted" without a prompt, so
+ * this is safe to call WITHOUT a user gesture on the silent-probe path.
+ * Returns false if iOS wants a gesture (caller should fall back to the
+ * permission gate).
+ */
+export async function rearmOrientation(): Promise<boolean> {
+  return (await dispatchOrientationRequest()) === "granted";
+}
+
 export function allGranted(r: ArPermissionsResult): boolean {
   return r.camera === "granted" && r.orientation === "granted";
 }

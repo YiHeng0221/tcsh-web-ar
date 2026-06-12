@@ -17,7 +17,7 @@
  */
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   DoubleSide,
   type Group,
@@ -108,6 +108,8 @@ export type ARSceneProps = {
   placements: RenderPlacement[];
   videoWidth: number;
   videoHeight: number;
+  /** Render anchor-frame axes/grid + wireframe quad outlines (field HUD). */
+  debug?: boolean;
 };
 
 /**
@@ -161,16 +163,27 @@ function ARSceneInner({
   placements,
   videoWidth,
   videoHeight,
+  debug = false,
 }: ARSceneProps) {
   const groupRef = useRef<Group>(null);
   const invalidate = useThree((s) => s.invalidate);
+  // Texture loads must ALSO trigger a React re-render: cache.get() runs in
+  // the component body, so without this tick the quads never re-query the
+  // cache and stay textureless forever (field bug 2026-06-13 — wireframes
+  // visible, textures never appeared). invalidate() alone only redraws the
+  // three.js frame, it does not re-run React components.
+  const [, setTexTick] = useState(0);
 
   // One shared geometry + per-placement material. The unit plane is scaled per
   // placement; sharing the geometry avoids 300 PlaneGeometry allocations.
   const geometry = useMemo(() => new PlaneGeometry(1, 1), []);
 
   const cache = useMemo(
-    () => new TextureCache(TEXTURE_CACHE_LIMIT, () => invalidate()),
+    () =>
+      new TextureCache(TEXTURE_CACHE_LIMIT, () => {
+        invalidate();
+        setTexTick((t) => t + 1);
+      }),
     [invalidate],
   );
 
@@ -196,8 +209,20 @@ function ARSceneInner({
           placement={p}
           geometry={geometry}
           cache={cache}
+          debug={debug}
         />
       ))}
+      {debug && (
+        <>
+          {/* Anchor-frame visualisation: RGB axes at the QR origin
+              (x=red, y=green up, z=blue) + a 4m ground grid. If these
+              don't appear where the physical QR lies, the pose chain is
+              wrong; if they do but quads don't, the quads are simply
+              outside the current view direction. */}
+          <axesHelper args={[0.5]} />
+          <gridHelper args={[4, 8, 0x00ffcc, 0x224444]} />
+        </>
+      )}
     </group>
   );
 }
@@ -211,10 +236,12 @@ function PlacementQuad({
   placement,
   geometry,
   cache,
+  debug = false,
 }: {
   placement: RenderPlacement;
   geometry: PlaneGeometry;
   cache: TextureCache;
+  debug?: boolean;
 }) {
   const material = useMemo(
     () =>
@@ -240,13 +267,21 @@ function PlacementQuad({
   material.needsUpdate = true;
 
   return (
-    <mesh
-      geometry={geometry}
-      material={material}
+    <group
       position={placement.position}
       quaternion={placement.rotation}
       scale={placement.scale}
-    />
+    >
+      <mesh geometry={geometry} material={material} />
+      {debug && (
+        // Magenta outline renders even while the texture is loading (or
+        // failing) — separates "quad is outside the view" from "texture
+        // never arrived" in one glance.
+        <mesh geometry={geometry}>
+          <meshBasicMaterial color={0xff00ff} wireframe toneMapped={false} />
+        </mesh>
+      )}
+    </group>
   );
 }
 
