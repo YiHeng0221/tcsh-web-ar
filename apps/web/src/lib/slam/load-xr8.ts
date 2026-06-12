@@ -29,13 +29,29 @@ export const XR8_ENGINE_URL =
 let loadPromise: Promise<XR8Static> | null = null;
 
 /**
+ * The engine's `XR8.Threejs` pipeline module resolves three.js via the
+ * legacy `window.THREE` global (field error 2026-06-13: "window.THREE
+ * does not exist but is required by the ThreeJS pipeline module"). We
+ * bundle three as an ES module, so expose OUR copy as the global before
+ * the engine boots — same instance the rest of the app renders with, so
+ * objects can cross between XR8's scene and ours safely.
+ */
+async function ensureGlobalThree(): Promise<void> {
+  const w = window as unknown as { THREE?: unknown };
+  if (w.THREE) return;
+  w.THREE = await import("three");
+}
+
+/**
  * Inject the XR8 engine script (once) and resolve with the global `XR8`.
  * Rejects if the script fails to load or the global never appears.
  */
 export function loadXR8(src: string = XR8_ENGINE_URL): Promise<XR8Static> {
   if (loadPromise) return loadPromise;
 
-  loadPromise = new Promise<XR8Static>((resolve, reject) => {
+  loadPromise = ensureGlobalThree().then(
+    () =>
+      new Promise<XR8Static>((resolve, reject) => {
     if (typeof document === "undefined") {
       reject(new Error("loadXR8 requires a browser document"));
       return;
@@ -71,8 +87,9 @@ export function loadXR8(src: string = XR8_ENGINE_URL): Promise<XR8Static> {
       if (window.XR8) resolve(window.XR8);
     };
 
-    document.head.appendChild(script);
-  });
+        document.head.appendChild(script);
+      }),
+  );
 
   return loadPromise;
 }
