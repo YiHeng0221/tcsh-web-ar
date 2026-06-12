@@ -132,10 +132,14 @@ PROMPT_FILE="$WORK_DIR/prompt.md"
 echo "Prompt size: $(wc -c < "$PROMPT_FILE") bytes"
 
 # ─── Run claude ───────────────────────────────────────────────────────────
+# Prompt goes via stdin, NOT argv — a large diff (e.g. a migration PR's
+# ~300KB prompt) blows past ARG_MAX and fails with "Argument list too
+# long" (exit 126) if passed as an argument.
 REVIEW_OUTPUT="$WORK_DIR/review.md"
-claude -p "$(cat "$PROMPT_FILE")" \
+claude -p \
   --model "$CLAUDE_MODEL" \
   --output-format text \
+  < "$PROMPT_FILE" \
   > "$REVIEW_OUTPUT"
 
 if [ ! -s "$REVIEW_OUTPUT" ]; then
