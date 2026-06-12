@@ -342,3 +342,10 @@ make docker-up
 ## License
 
 TBD.
+
+## AI Review Pipeline
+
+Every PR runs through `ci.yml` (size guard / gitleaks / api / web). On green,
+the PR is tagged `ai-review` and `review.yml` chains an AI code review using
+the rubric in `REVIEW.md`. Verdict labels: `review/pass` or `ai-fix`.
+See `docs/REVIEWS.md` for the audit log.
