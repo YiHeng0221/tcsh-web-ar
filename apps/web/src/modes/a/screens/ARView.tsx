@@ -115,6 +115,8 @@ export default function ARView() {
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [opencvReady, setOpencvReady] = useState(false);
+  const [opencvError, setOpencvError] = useState<string | null>(null);
+  const cvLoadStartRef = useRef<number | null>(null);
   const [reticle, setReticle] = useState<ReticleState>("preparing");
   const [needsRecalibration, setNeedsRecalibration] = useState(false);
   const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(
@@ -259,15 +261,19 @@ export default function ARView() {
       // OpenCV loads in parallel with the camera coming up (spec §0.5: load in
       // the background, show a preparing state). The detector starts now but
       // solves are gated on cvRef being populated inside handleDetection.
+      cvLoadStartRef.current = performance.now();
       loadOpenCv()
         .then((cv) => {
           if (!mountedRef.current) return;
           cvRef.current = cv;
           setOpencvReady(true);
         })
-        .catch(() => {
-          // OpenCV failed to load — scanning can't produce a pose. Leave the
-          // preparing reticle up; nothing crashes.
+        .catch((err: unknown) => {
+          // OpenCV failed to load — scanning can't produce a pose. Surface
+          // the failure (HUD + hint) instead of silently spinning forever:
+          // the field bug 2026-06-13 was exactly this state, undiagnosable.
+          if (!mountedRef.current) return;
+          setOpencvError(err instanceof Error ? err.message : String(err));
         });
 
       // The QR detector's lifecycle is owned by the phase effect below (it
@@ -407,9 +413,10 @@ export default function ARView() {
   }, [navigate, releaseAll]);
 
   const reticleHint = useMemo(() => {
+    if (opencvError) return "辨識引擎載入失敗，請重新整理頁面";
     if (!opencvReady) return "準備中…";
     return "對準地面的 QR";
-  }, [opencvReady]);
+  }, [opencvReady, opencvError]);
 
   const effectiveVideoSize = videoSize ?? { w: 1280, h: 720 };
 
@@ -499,8 +506,19 @@ export default function ARView() {
         <div className="safe-area pointer-events-none absolute inset-x-0 bottom-0 z-50 px-3 pb-3 font-mono text-[10px] leading-tight text-lime-300">
           <div className="rounded bg-black/70 p-2">
             <div>
-              phase={phase} cv={opencvReady ? "ready" : "loading"} video=
-              {videoSize ? `${videoSize.w}×${videoSize.h}` : "—"} station=
+              phase={phase} cv=
+              {opencvError
+                ? `FAILED:${opencvError.slice(0, 40)}`
+                : opencvReady
+                  ? "ready"
+                  : `loading(${
+                      cvLoadStartRef.current != null
+                        ? Math.round(
+                            (performance.now() - cvLoadStartRef.current) / 1000,
+                          )
+                        : 0
+                    }s)`}{" "}
+              video={videoSize ? `${videoSize.w}×${videoSize.h}` : "—"} station=
               {stationId ?? "—"}
             </div>
             <div>

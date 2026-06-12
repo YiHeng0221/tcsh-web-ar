@@ -151,6 +151,9 @@ export class QrDetector {
   private lastAttempt = 0;
   private rafId: number | null = null;
   private vfcId: number | null = null;
+  private watchdogId: number | null = null;
+  private tickCount = 0;
+  private forceRaf = false;
 
   constructor(opts: QrDetectorOptions) {
     this.throttleMs = opts.throttleMs ?? DEFAULT_THROTTLE_MS;
@@ -172,8 +175,26 @@ export class QrDetector {
       requestVideoFrameCallback?: (cb: () => void) => number;
       cancelVideoFrameCallback?: (id: number) => void;
     };
-    if (typeof v.requestVideoFrameCallback === "function") {
+    if (!this.forceRaf && typeof v.requestVideoFrameCallback === "function") {
       this.vfcId = v.requestVideoFrameCallback(() => this.tick());
+      // Watchdog: iOS Safari has been seen never delivering rVFC on a
+      // just-attached getUserMedia stream (field bug 2026-06-13:
+      // attempts=0 forever). If no tick lands within 1.5s, permanently
+      // fall back to the rAF loop — costs a little battery, but a dead
+      // scan loop costs the whole feature.
+      if (this.watchdogId == null) {
+        this.watchdogId = window.setTimeout(() => {
+          this.watchdogId = null;
+          if (this.running && this.tickCount === 0) {
+            this.forceRaf = true;
+            if (this.vfcId != null && v.cancelVideoFrameCallback) {
+              v.cancelVideoFrameCallback(this.vfcId);
+              this.vfcId = null;
+            }
+            this.scheduleNext();
+          }
+        }, 1500);
+      }
     } else {
       this.rafId = requestAnimationFrame(() => this.tick());
     }
@@ -181,6 +202,7 @@ export class QrDetector {
 
   private tick(): void {
     if (!this.running || !this.video) return;
+    this.tickCount += 1;
     const now =
       typeof performance !== "undefined" ? performance.now() : Date.now();
     if (now - this.lastAttempt >= this.throttleMs) {
@@ -219,6 +241,10 @@ export class QrDetector {
     const v = this.video as
       | (HTMLVideoElement & { cancelVideoFrameCallback?: (id: number) => void })
       | null;
+    if (this.watchdogId != null) {
+      window.clearTimeout(this.watchdogId);
+      this.watchdogId = null;
+    }
     if (this.vfcId != null && v?.cancelVideoFrameCallback) {
       v.cancelVideoFrameCallback(this.vfcId);
     }
