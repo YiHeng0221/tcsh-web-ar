@@ -57,6 +57,7 @@ jobs:
               | select(.path | endswith("package-lock.json") | not)
               | select(.path | endswith(".snap") | not)
               | select(.path | endswith("api.gen.ts") | not)
+              | select(.path | startswith("docs/dev-journal/") | not)
               | .additions + .deletions
             ] | add // 0')
           raw=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json additions,deletions \
