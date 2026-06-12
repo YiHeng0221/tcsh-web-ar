@@ -47,6 +47,13 @@ declare global {
       reality?: XR8RealityPose;
       [key: string]: unknown;
     };
+    /** Engine ≥1.0 surfaces CameraPixelArray frames HERE (verified by
+     *  dissecting the binary: `processGpuResult.camerapixelarray =
+     *  { rows, cols, rowBytes, pixels, srcTex }`), not in the CPU result
+     *  like older docs suggest. */
+    processGpuResult?: {
+      [key: string]: unknown;
+    };
     [key: string]: unknown;
   }
 

@@ -56,6 +56,11 @@ type Hud = {
   lastReprojPx: number | null;
   /** Last QR text seen (for sanity — is it even our station?). */
   lastQrText: string | null;
+  /** Diagnostics: luminance frames read OK vs null, decode attempts, keys seen. */
+  lumOk: number;
+  lumNull: number;
+  decTries: number;
+  cpuKeys: string | null;
   error: string | null;
 };
 
@@ -71,11 +76,17 @@ function isLikelyMobile(): boolean {
 
 export default function DevSlamMvp() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** The pixel-array module's self-reported result key (rename-proof). */
+  const cpaKeyRef = useRef<string | null>(null);
   const [hud, setHud] = useState<Hud>({
     slam: "idle",
     aligned: false,
     lastReprojPx: null,
     lastQrText: null,
+    lumOk: 0,
+    lumNull: 0,
+    decTries: 0,
+    cpuKeys: null,
     error: null,
   });
   const [mobile] = useState(isLikelyMobile);
@@ -143,7 +154,7 @@ export default function DevSlamMvp() {
           error: err instanceof Error ? err.message : String(err),
         }));
       },
-      onUpdate: ({ processCpuResult }) => {
+      onUpdate: ({ processCpuResult, processGpuResult }) => {
         const reality = processCpuResult?.reality;
         if (reality) {
           const p = reality.position;
@@ -168,8 +179,29 @@ export default function DevSlamMvp() {
         if (now - lastQrAttemptRef.current < 160) return;
         lastQrAttemptRef.current = now;
 
-        const cam = readCameraLuminance(processCpuResult);
-        if (!cam || !slamPoseRef.current) return;
+        const cam = readCameraLuminance(
+          processCpuResult,
+          processGpuResult,
+          cpaKeyRef.current,
+        );
+        if (!cam) {
+          setHud((h) => ({
+            ...h,
+            lumNull: h.lumNull + 1,
+            // Capture both stages' keys once — the binary dissection showed
+            // the frame lives in processGpuResult on engine 1.0.
+            cpuKeys:
+              h.cpuKeys ??
+              `cpu:[${
+                processCpuResult ? Object.keys(processCpuResult).join(",") : ""
+              }] gpu:[${
+                processGpuResult ? Object.keys(processGpuResult).join(",") : ""
+              }]`,
+          }));
+          return;
+        }
+        if (!slamPoseRef.current) return;
+        setHud((h) => ({ ...h, lumOk: h.lumOk + 1, decTries: h.decTries + 1 }));
 
         const detection = decodeQrFromLuminance(cam.data, cam.width, cam.height);
         if (!detection) return;
@@ -201,6 +233,14 @@ export default function DevSlamMvp() {
     };
 
     try {
+      // Keep the instance: the field showed processCpuResult carrying only
+      // [threejsrenderer, reality] — the pixel-array result key drifted from
+      // the historical 'camerapixelarray'. Reading the module's OWN .name is
+      // rename-proof.
+      const cpaModule = XR8.CameraPixelArray.pipelineModule({
+        luminance: true,
+      });
+      cpaKeyRef.current = (cpaModule as { name?: string }).name ?? null;
       XR8.addCameraPipelineModules([
         XR8.GlTextureRenderer.pipelineModule(), // draw the camera feed
         XR8.Threejs.pipelineModule(), // three.js scene + camera
@@ -208,9 +248,17 @@ export default function DevSlamMvp() {
         // Luminance frames for QR. Half-res keeps decode cheap; the corner
         // pixel coords come back in THIS resolution, which is also what we
         // pass to solveSquarePose, so intrinsics stay self-consistent.
-        XR8.CameraPixelArray.pipelineModule({ luminance: true }),
+        cpaModule,
         fusionModule,
       ]);
+      // Size the BACKING store to the displayed size before run — the
+      // engine reads the canvas dimensions to pick its render aspect. The
+      // earlier 100%-CSS-stomp fixed "top strip" but distorted the image
+      // (CSS stretch over a mismatched backing aspect). Matching backing
+      // to display keeps the feed fullscreen AND aspect-true.
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(canvas.clientWidth * dpr);
+      canvas.height = Math.round(canvas.clientHeight * dpr);
       XR8.run({ canvas });
     } catch (e) {
       startedRef.current = false;
@@ -233,13 +281,29 @@ export default function DevSlamMvp() {
       <canvas
         ref={canvasRef}
         className="absolute inset-0 h-full w-full"
-        // The engine sizes the backing store itself.
+        // Inline style too: the engine writes its own inline sizing on run,
+        // which beats the Tailwind classes (field bug: feed rendered as a
+        // top strip). Inline-with-!important from us wins the cascade.
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+        }}
       />
 
       {/* HUD */}
       <div className="safe-area pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between px-4 pt-4 text-xs">
         <div className="pointer-events-auto rounded bg-black/55 px-2 py-1 font-mono leading-5">
           <div>slam: {hud.slam}</div>
+          <div>
+            lum: ok={hud.lumOk} null={hud.lumNull} dec={hud.decTries}
+          </div>
+          {hud.cpuKeys && (
+            <div>
+              keys: {hud.cpuKeys.slice(0, 60)} cpa={cpaKeyRef.current ?? "?"}
+            </div>
+          )}
           <div>aligned: {hud.aligned ? "Y" : "n"}</div>
           <div>
             reproj:{" "}
@@ -319,12 +383,24 @@ export default function DevSlamMvp() {
  */
 function readCameraLuminance(
   processCpuResult: XR8PipelineUpdateArgs["processCpuResult"],
+  processGpuResult: XR8PipelineUpdateArgs["processGpuResult"],
+  moduleKey: string | null,
 ): { data: Uint8Array; width: number; height: number } | null {
-  if (!processCpuResult) return null;
-  const r = processCpuResult as Record<string, unknown>;
-  const cpa =
-    (r.camerapixelarray as Record<string, unknown> | undefined) ??
-    (r.cameraPixelArray as Record<string, unknown> | undefined);
+  // Engine 1.0 (binary dissection 2026-06-13): the frame is in the GPU
+  // stage result. Check it first, fall back to the legacy CPU location.
+  const sources = [processGpuResult, processCpuResult].filter(
+    Boolean,
+  ) as Record<string, unknown>[];
+  let cpa: Record<string, unknown> | undefined;
+  for (const r of sources) {
+    cpa =
+      (moduleKey
+        ? (r[moduleKey] as Record<string, unknown> | undefined)
+        : undefined) ??
+      (r.camerapixelarray as Record<string, unknown> | undefined) ??
+      (r.cameraPixelArray as Record<string, unknown> | undefined);
+    if (cpa) break;
+  }
   if (!cpa) return null;
 
   const pixels = cpa.pixels as ArrayLike<number> | undefined;
