@@ -17,7 +17,14 @@ const B2Viewer = lazy(() => import("@/modes/b/screens/B2Viewer"));
 // three.js render layer, and (dynamically, one level deeper) the ~8 MB OpenCV
 // WASM — stays out of the main bundle. A visitor on Landing or in Mode B must
 // never pay for it; only a deep-link into /a/scan|/a/view pulls this chunk.
-const ARView = lazy(() => import("@/modes/a/screens/ARView"));
+//
+// Mode A v3: the deep link now resolves to ARViewWithFallback, which probes the
+// 8th Wall engine and renders the SLAM walking-AR path (ARViewSlam) when it
+// loads, falling back to the legacy QR+IMU ARView (「精簡模式」) when it can't.
+// The 8th Wall engine binary itself stays out of every bundle — it's a
+// runtime-injected <script> (lib/slam/load-xr8.ts), so this chunk only grows by
+// the SLAM screen's own JS, not the ~1 MB engine.
+const ARView = lazy(() => import("@/modes/a/screens/ARViewWithFallback"));
 
 // Dev-only sandbox for eyeballing the Mode A mock placements without a
 // camera. Lazy for the same three.js-bundle reason as B2. Dev-only by
