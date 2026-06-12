@@ -47,6 +47,16 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
+          # Escape hatch: the `size-override` label skips the guard. For
+          # cohesive atomic changes (DB migrations, dependency swaps) where
+          # splitting would leave main broken mid-sequence. The PR body must
+          # say WHY the override is justified — reviewers check for it.
+          HAS_OVERRIDE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json labels \
+            --jq '[.labels[].name] | map(select(. == "size-override")) | length')
+          if [ "$HAS_OVERRIDE" -gt 0 ]; then
+            echo "::notice::size-override label present — skipping the 800 LoC guard."
+            exit 0
+          fi
           # 排除 lockfile / 自動產生 types / snapshot — 這些檔的 line count
           # 跟人類審 review 的 effort 不成比例。
           total=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json files --jq '
