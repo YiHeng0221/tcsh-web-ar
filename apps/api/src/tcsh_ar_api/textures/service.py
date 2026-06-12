@@ -15,6 +15,7 @@ detritus rather than risk a half-broken cleanup path.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import mimetypes
 import os
@@ -173,10 +174,8 @@ class TextureService:
             await self.session.rollback()
             # If write_bytes succeeded but os.replace failed, don't leave an
             # orphan .tmp behind — best-effort, the StorageError is the story.
-            try:
+            with contextlib.suppress(OSError):
                 tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
             raise StorageError() from exc
 
         try:
