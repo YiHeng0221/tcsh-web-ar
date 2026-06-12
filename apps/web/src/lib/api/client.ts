@@ -27,7 +27,7 @@
 // to avoid the circular import that arises from auth.ts importing apiPost
 // from this file. The constants are stable primitive values; importing
 // them here means a single edit in auth.ts is enough to update both paths.
-import { AUTH_EVENT, EMAIL_KEY, TOKEN_KEY } from "@/modes/c/lib/auth";
+import { AUTH_EVENT, EMAIL_KEY, TOKEN_KEY } from "@/lib/api/authConstants";
 
 const BASE = "/api";
 

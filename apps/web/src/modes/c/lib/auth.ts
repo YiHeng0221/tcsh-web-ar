@@ -35,8 +35,8 @@ import { apiGet, apiPost, ApiError } from "@/lib/api/client";
 // `notifyAuthChanged()`, which uses `AUTH_EVENT` from this file, which
 // imports `apiPost` from `client.ts`).
 
-export const TOKEN_KEY = "tcsh.auth.token";
-export const EMAIL_KEY = "tcsh.auth.email";
+export { AUTH_EVENT, EMAIL_KEY, TOKEN_KEY } from "@/lib/api/authConstants";
+import { AUTH_EVENT, EMAIL_KEY, TOKEN_KEY } from "@/lib/api/authConstants";
 
 // ── Wire types ---------------------------------------------------------
 
@@ -112,7 +112,6 @@ export function clearSession(): void {
 // top of it for components mounted in the same tab as signIn/signOut.
 // Exported so `client.ts` can dispatch the same event name without a
 // hand-rolled duplicate constant.
-export const AUTH_EVENT = "tcsh:auth-changed";
 
 function notifyAuthChanged(): void {
   if (typeof window === "undefined") return;

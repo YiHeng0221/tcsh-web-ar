@@ -139,12 +139,19 @@ export default function C5PlacementEditor() {
   const [validationErrors, setValidationErrors] = useState<string[] | null>(
     null,
   );
+  // Unsaved-changes guard for selection switches. window.confirm blocks
+  // the main thread and is silently skipped (auto-true) in several PWA /
+  // fullscreen contexts, so we use the same inline-banner pattern as the
+  // validation errors: stash the requested target, render a banner with
+  // an explicit confirm button.
+  const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
 
   // Reset form state when the selection changes (or the underlying server
   // record changes via cache invalidation).
   useEffect(() => {
     setFormValues(pristine);
     setValidationErrors(null);
+    setPendingSwitch(null);
   }, [pristine]);
 
   // ── Save mutation ─────────────────────────────────────────────────
@@ -201,6 +208,10 @@ export default function C5PlacementEditor() {
         prev?.map((p) => (p.id === updated.id ? updated : p)),
       );
       queryClient.setQueryData<Placement>(["placement", updated.id], updated);
+      // C2's dashboard reads ["c", "placements"] — same endpoint, separate
+      // cache entry. Mirror C4's dual-key invalidation so its 已上貼圖
+      // stats recompute after edits here.
+      void queryClient.invalidateQueries({ queryKey: ["c", "placements"] });
     },
   });
 
@@ -246,12 +257,10 @@ export default function C5PlacementEditor() {
     // Reset form if dirty? Mockup doesn't show a confirm dialog — but a
     // silent loss feels rude, so we ask. Save-on-select would mask the
     // explicit 儲存變更 affordance.
-    if (
-      formValues &&
-      pristine &&
-      !shallowEqualForm(formValues, pristine) &&
-      !window.confirm("有未儲存的變更，確定要切換嗎？")
-    ) {
+    if (formValues && pristine && !shallowEqualForm(formValues, pristine)) {
+      // Dirty form — ask via the inline banner instead of window.confirm
+      // (blocked / auto-confirmed in some PWA contexts).
+      setPendingSwitch(id);
       return;
     }
     navigate(`${studioBase}/placements/${id}`);
@@ -357,6 +366,33 @@ export default function C5PlacementEditor() {
                 <li key={err}>{err}</li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {pendingSwitch && (
+          <div
+            role="alert"
+            className="flex items-center gap-4 border-b border-warning/40 bg-warning/10 px-6 py-3 text-sm"
+          >
+            <span>有未儲存的變更，切換後將會遺失。</span>
+            <button
+              type="button"
+              className="rounded border border-danger px-3 py-1 text-danger"
+              onClick={() => {
+                const target = pendingSwitch;
+                setPendingSwitch(null);
+                navigate(`${studioBase}/placements/${target}`);
+              }}
+            >
+              捨棄變更並切換
+            </button>
+            <button
+              type="button"
+              className="rounded border border-muted px-3 py-1"
+              onClick={() => setPendingSwitch(null)}
+            >
+              留在這裡
+            </button>
           </div>
         )}
 

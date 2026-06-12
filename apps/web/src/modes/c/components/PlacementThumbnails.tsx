@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+
 import type { Placement } from "@/lib/api";
 
 import type { Texture } from "../lib/textureApi";
@@ -27,7 +29,12 @@ export function PlacementThumbnails({
   selectedId,
   onSelect,
 }: Props) {
-  const textureById = new Map(textures.map((t) => [t.id, t]));
+  // Memoised: this strip re-renders on every selection change (arrow-key
+  // navigation), and the map only depends on the textures list.
+  const textureById = useMemo(
+    () => new Map(textures.map((t) => [t.id, t])),
+    [textures],
+  );
 
   return (
     <nav
