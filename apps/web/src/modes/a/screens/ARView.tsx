@@ -85,8 +85,14 @@ const freshDiag = (): DiagCounters => ({
   lastReprojPx: null,
 });
 
-/** QR scan throttle while viewing — low-frequency recalibration (spec §0.5). */
-const VIEWING_SCAN_THROTTLE_MS = 500; // ~2fps
+/**
+ * QR scan throttle while viewing. Originally 2fps ("low-frequency
+ * recalibration"), raised to 10fps once the pure-TS solver landed
+ * (sub-ms solves, no WASM): every solve carries a FULL 6DoF pose, so
+ * while any QR stays in frame the user can WALK and position tracks
+ * live — the station-freeze only applies when no QR is visible.
+ */
+const VIEWING_SCAN_THROTTLE_MS = 100; // ~10fps
 
 /**
  * QR physical edge length (mm). The real value is `AnchorOut.size_mm` from the
