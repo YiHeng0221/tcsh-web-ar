@@ -95,16 +95,12 @@ camera、pivot recenter、texture disposal）。7 個 commit，**已含兩輪 AI
 
 ---
 
-## Wave 2-C：`feature/mode-b-b3-b4`（原 #62）
+## ~~Wave 2-C：`feature/mode-b-b3-b4`（原 #62）~~ — **已取消（2026-06-13）**
 
-**前置：** Wave 2-B 已合進 main 才動工。
-
-**這個分支做什麼：** B3 Search + B4 List。基於 B2 的場景架構。
-
-**已知衝突點：** 主要跟 B2 的檔案重疊（router、Mode B 目錄）。rebase 到含 B2
-的 main 後衝突應大幅減少。Search/List 元件本身是新檔，少衝突。
-
-**驗證：** 同 2-B。
+**Scope 收斂決策（使用者 2026-06-13 拍板）：** 貼圖不需要介紹/名稱，所以
+**不需要搜尋與列表**。Mode B 只要「看 glb + 旋轉縮放」——B2 已完整涵蓋。
+此分支不 rebase、不合併；origin #62 之後關閉。B2 若帶有 B3/B4 的路由
+stub，留著無害，之後 scope-trim PR 一併清。
 
 ---
 
@@ -124,6 +120,12 @@ Auth 流程對接的是 **SQLite 本地 JWT auth**（#61 的產物）。
 
 **驗證：** 同 2-B，外加手動確認 `bun run build` 後 Mode C chunk 是獨立的
 （code-split 規則：訪客不下載 admin bundle）。
+
+**Scope 註記（2026-06-13）：** 使用者收斂 Mode C 需求為「輸入 URL 進入 +
+上傳貼圖 + 調整個別貼圖位置」。策略：**照原樣 rebase + 合併**（程式已寫好、
+在 origin 過過 review），合併後另開一個 scope-trim PR 把多餘畫面入口收掉
+（C2 dashboard 精簡、C3 視需要、登入流程評估改 magic-link URL）。
+不要在 rebase 時順手刪功能——違反通用規則 #1。
 
 ---
 
