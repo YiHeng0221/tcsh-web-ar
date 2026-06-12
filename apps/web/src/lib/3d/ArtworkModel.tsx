@@ -1,6 +1,6 @@
 import { useGLTF } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
-import { useLayoutEffect, useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import type { Material, Object3D } from "three";
 import { Box3, Mesh, Vector3 } from "three";
 import type { GLTF } from "three-stdlib";
@@ -101,25 +101,24 @@ export function ArtworkModel({ framing = 1.8, onReady }: Props = {}) {
     onReady?.();
   }, [scene, camera, controls, framing, onReady]);
 
-  // Dispose the cloned GPU resources when the component unmounts.
-  // Runs once per mount (empty deps); by that time `scene` is stable
-  // for this lifetime because `useMemo` above only reruns when the
-  // source glTF changes (which coincides with a remount anyway).
+  // Dispose the cloned GPU resources when the component unmounts. The
+  // ref indirection (instead of closing over `scene` with empty deps +
+  // eslint-disable) means the cleanup always reads the *latest* clone —
+  // so if ARTWORK_MODEL_URL ever becomes a prop and `scene` can change
+  // mid-mount, this disposes the right one instead of silently leaking
+  // GPU memory. Today the URL is a module-level const
+  // (src/lib/3d/artworkUrl.ts) and the ref only ever holds one value.
+  const sceneRef = useRef(scene);
+  sceneRef.current = scene;
   useLayoutEffect(() => {
     return () => {
-      scene.traverse((node) => {
+      sceneRef.current.traverse((node) => {
         if (node instanceof Mesh) {
           node.geometry?.dispose();
           disposeMaterial(node.material);
         }
       });
     };
-    // Invariant behind the empty deps: ARTWORK_MODEL_URL is a
-    // module-level const (src/lib/3d/artworkUrl.ts), so the glTF — and
-    // therefore `scene` — cannot change during one mount's lifetime. If
-    // the URL ever becomes a prop, this cleanup must capture `scene` via
-    // deps or it will dispose the wrong clone.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return <primitive object={scene} />;

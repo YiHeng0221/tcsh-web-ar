@@ -51,7 +51,14 @@ export default function B2Viewer() {
   // stealing focus back to the "知道了" button while the user is rotating
   // the model.
   const dismissHints = useCallback(() => {
-    localStorage.setItem(GESTURE_HINTS_KEY, "1");
+    // Best-effort persistence: Safari Private Mode throws
+    // QuotaExceededError on setItem — the overlay must still close, the
+    // user just sees the hints again next visit.
+    try {
+      localStorage.setItem(GESTURE_HINTS_KEY, "1");
+    } catch {
+      /* best-effort */
+    }
     setHintsVisible(false);
   }, []);
 
