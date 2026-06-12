@@ -17,7 +17,7 @@
  */
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   DoubleSide,
   type Group,
@@ -167,13 +167,23 @@ function ARSceneInner({
 }: ARSceneProps) {
   const groupRef = useRef<Group>(null);
   const invalidate = useThree((s) => s.invalidate);
+  // Texture loads must ALSO trigger a React re-render: cache.get() runs in
+  // the component body, so without this tick the quads never re-query the
+  // cache and stay textureless forever (field bug 2026-06-13 — wireframes
+  // visible, textures never appeared). invalidate() alone only redraws the
+  // three.js frame, it does not re-run React components.
+  const [, setTexTick] = useState(0);
 
   // One shared geometry + per-placement material. The unit plane is scaled per
   // placement; sharing the geometry avoids 300 PlaneGeometry allocations.
   const geometry = useMemo(() => new PlaneGeometry(1, 1), []);
 
   const cache = useMemo(
-    () => new TextureCache(TEXTURE_CACHE_LIMIT, () => invalidate()),
+    () =>
+      new TextureCache(TEXTURE_CACHE_LIMIT, () => {
+        invalidate();
+        setTexTick((t) => t + 1);
+      }),
     [invalidate],
   );
 
