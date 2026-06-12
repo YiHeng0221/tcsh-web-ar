@@ -41,7 +41,9 @@ if ! command -v claude >/dev/null 2>&1; then
   exit 1
 fi
 
-WORK_DIR=$(mktemp -d -t ai-review)
+# `-t ai-review.XXXXXXXX` works on both GNU (Linux runner) and BSD (macOS)
+# mktemp — GNU requires the X's, BSD treats `-t` as a prefix either way.
+WORK_DIR=$(mktemp -d -t ai-review.XXXXXXXX)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 # ─── Fetch PR metadata ────────────────────────────────────────────────────
