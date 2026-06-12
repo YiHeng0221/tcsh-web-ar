@@ -43,11 +43,11 @@ class TextureService:
             upload_url=signed.upload_url,
             storage_path=signed.storage_path,
             token=signed.token,
-            expires_at=_parse_token_exp(signed.token),
+            expires_at=parse_token_exp(signed.token),
         )
 
 
-def _parse_token_exp(token: str) -> int:
+def parse_token_exp(token: str) -> int:
     """Pull the `exp` claim out of the Supabase signed URL token.
 
     Falls back to `now + _FALLBACK_EXPIRES_IN_SECONDS` if the token isn't a
