@@ -44,7 +44,7 @@ import {
 } from "@/lib/ar/mock-placements";
 import { solveSquarePose } from "@/lib/ar/ippe";
 import { applyAlignment, computeAlignment } from "@/lib/slam/alignment";
-import { loadXR8 } from "@/lib/slam/load-xr8";
+import { loadXR8, loadXRExtras } from "@/lib/slam/load-xr8";
 import { decodeQrFromLuminance } from "@/lib/slam/qr-from-luminance";
 
 type SlamStatus = "idle" | "loading" | "starting" | "tracking" | "error";
@@ -61,6 +61,10 @@ type Hud = {
   lumNull: number;
   decTries: number;
   cpuKeys: string | null;
+  /** Camera track zoom capability + applied value ("0.5–8 →0.5" / "n/a"). */
+  zoomInfo: string | null;
+  /** Actual capture resolution, read off the first luminance frame. */
+  capRes: string | null;
   error: string | null;
 };
 
@@ -87,6 +91,8 @@ export default function DevSlamMvp() {
     lumNull: 0,
     decTries: 0,
     cpuKeys: null,
+    zoomInfo: null,
+    capRes: null,
     error: null,
   });
   const [mobile] = useState(isLikelyMobile);
@@ -110,6 +116,7 @@ export default function DevSlamMvp() {
     } catch {
       // best-effort teardown
     }
+    restoreConstraintShim();
   }, []);
 
   const start = useCallback(async () => {
@@ -117,9 +124,18 @@ export default function DevSlamMvp() {
     startedRef.current = true;
     setHud((h) => ({ ...h, slam: "loading", error: null }));
 
+    // Constraint injection: the engine only sends `min` width/height to
+    // getUserMedia on iOS (binary dissection: min 960×720), letting the
+    // browser pick a 16:9 sensor-crop mode — the exact "zoom" Mode A had
+    // before we forced 4:3. Augment the engine's own video constraints
+    // with the Mode A recipe (same lens, full-sensor 4:3) and restore the
+    // original API on teardown.
+    installConstraintShim();
+
     let XR8: XR8Static;
+    let xrExtras: import("@/lib/slam/load-xr8").XRExtrasStatic;
     try {
-      XR8 = await loadXR8();
+      [XR8, xrExtras] = await Promise.all([loadXR8(), loadXRExtras()]);
     } catch (e) {
       startedRef.current = false;
       setHud((h) => ({
@@ -145,6 +161,16 @@ export default function DevSlamMvp() {
       onCameraStatusChange: ({ status }) => {
         if (status === "hasStream" || status === "hasVideo") {
           setHud((h) => ({ ...h, slam: "tracking" }));
+          // Ultra-wide experiment is opt-in only (?wide=1): field test
+          // showed switching lenses breaks the engine's calibration hard —
+          // QR decode and tracking both die. Kept for future evaluation.
+          if (new URLSearchParams(window.location.search).get("wide") === "1") {
+            window.setTimeout(() => {
+              void tryWidenCamera((info) =>
+                setHud((h) => ({ ...h, zoomInfo: info })),
+              );
+            }, 800);
+          }
         }
       },
       onException: (err) => {
@@ -201,7 +227,12 @@ export default function DevSlamMvp() {
           return;
         }
         if (!slamPoseRef.current) return;
-        setHud((h) => ({ ...h, lumOk: h.lumOk + 1, decTries: h.decTries + 1 }));
+        setHud((h) => ({
+          ...h,
+          lumOk: h.lumOk + 1,
+          decTries: h.decTries + 1,
+          capRes: h.capRes ?? `${cam.width}×${cam.height}`,
+        }));
 
         const detection = decodeQrFromLuminance(cam.data, cam.width, cam.height);
         if (!detection) return;
@@ -242,6 +273,10 @@ export default function DevSlamMvp() {
       });
       cpaKeyRef.current = (cpaModule as { name?: string }).name ?? null;
       XR8.addCameraPipelineModules([
+        // Official canvas management (same module the example repo's xrweb
+        // uses): fullscreen, aspect-true, rotation-aware. Replaces all the
+        // hand-rolled sizing from earlier field rounds.
+        xrExtras.FullWindowCanvas.pipelineModule(),
         XR8.GlTextureRenderer.pipelineModule(), // draw the camera feed
         XR8.Threejs.pipelineModule(), // three.js scene + camera
         XR8.XrController.pipelineModule(), // SLAM 6DoF
@@ -251,14 +286,8 @@ export default function DevSlamMvp() {
         cpaModule,
         fusionModule,
       ]);
-      // Size the BACKING store to the displayed size before run — the
-      // engine reads the canvas dimensions to pick its render aspect. The
-      // earlier 100%-CSS-stomp fixed "top strip" but distorted the image
-      // (CSS stretch over a mismatched backing aspect). Matching backing
-      // to display keeps the feed fullscreen AND aspect-true.
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.round(canvas.clientWidth * dpr);
-      canvas.height = Math.round(canvas.clientHeight * dpr);
+      // Canvas sizing is owned by XRExtras.FullWindowCanvas (official
+      // module — fullscreen, aspect-true, rotation-aware).
       XR8.run({ canvas });
     } catch (e) {
       startedRef.current = false;
@@ -293,12 +322,14 @@ export default function DevSlamMvp() {
       />
 
       {/* HUD */}
-      <div className="safe-area pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between px-4 pt-4 text-xs">
+      <div className="safe-area pointer-events-none absolute inset-x-0 top-0 z-[10000] flex items-start justify-between px-4 pt-4 text-xs">
         <div className="pointer-events-auto rounded bg-black/55 px-2 py-1 font-mono leading-5">
           <div>slam: {hud.slam}</div>
           <div>
             lum: ok={hud.lumOk} null={hud.lumNull} dec={hud.decTries}
           </div>
+          {hud.capRes && <div>cap: {hud.capRes}</div>}
+          {hud.zoomInfo && <div>zoom: {hud.zoomInfo}</div>}
           {hud.cpuKeys && (
             <div>
               keys: {hud.cpuKeys.slice(0, 60)} cpa={cpaKeyRef.current ?? "?"}
@@ -444,5 +475,81 @@ function addPlacementsToScene(XR8: XR8Static, alignment: import("three").Matrix4
     mesh.quaternion.copy(world.quaternion);
     mesh.scale.copy(world.scale);
     scene.add(mesh);
+  }
+}
+
+
+/**
+ * Try to widen the camera FOV via the track's `zoom` capability (iOS 17+
+ * Safari; multi-lens iPhones report ranges below 1 where 0.5 = the
+ * ultra-wide lens). The engine owns the getUserMedia stream, so we locate
+ * its hidden <video> in the DOM and apply constraints to the live track.
+ * Harmless no-op when unsupported — the HUD reports what happened.
+ */
+async function tryWidenCamera(report: (info: string) => void): Promise<void> {
+  const video = Array.from(document.querySelectorAll("video")).find(
+    (v) => v.srcObject instanceof MediaStream,
+  );
+  const track = (video?.srcObject as MediaStream | undefined)
+    ?.getVideoTracks()
+    .at(0);
+  if (!track) {
+    report("no-track");
+    return;
+  }
+  type ZoomCaps = MediaTrackCapabilities & {
+    zoom?: { min: number; max: number };
+  };
+  const caps = (
+    track.getCapabilities ? track.getCapabilities() : {}
+  ) as ZoomCaps;
+  if (!caps.zoom) {
+    report("n/a");
+    return;
+  }
+  const target = Math.max(caps.zoom.min, 0.5);
+  try {
+    await track.applyConstraints({
+      advanced: [{ zoom: target } as MediaTrackConstraintSet],
+    });
+    report(`${caps.zoom.min}–${caps.zoom.max} →${target}`);
+  } catch (err) {
+    report(`failed:${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+
+// ── getUserMedia constraint shim ──────────────────────────────────────────
+// Augments video constraints with the Mode A 4:3 recipe while the SLAM page
+// is active. Same lens (no facingMode/deviceId change), just a full-sensor
+// capture mode instead of the browser's default 16:9 crop.
+let originalGetUserMedia:
+  | ((constraints?: MediaStreamConstraints) => Promise<MediaStream>)
+  | null = null;
+
+function installConstraintShim(): void {
+  if (originalGetUserMedia || !navigator.mediaDevices?.getUserMedia) return;
+  const md = navigator.mediaDevices;
+  originalGetUserMedia = md.getUserMedia.bind(md);
+  md.getUserMedia = (constraints?: MediaStreamConstraints) => {
+    if (constraints && typeof constraints.video === "object") {
+      constraints = {
+        ...constraints,
+        video: {
+          ...constraints.video,
+          width: { ideal: 1920 },
+          height: { ideal: 1440 },
+          aspectRatio: { ideal: 4 / 3 },
+        },
+      };
+    }
+    return originalGetUserMedia!(constraints);
+  };
+}
+
+function restoreConstraintShim(): void {
+  if (originalGetUserMedia && navigator.mediaDevices) {
+    navigator.mediaDevices.getUserMedia = originalGetUserMedia;
+    originalGetUserMedia = null;
   }
 }
