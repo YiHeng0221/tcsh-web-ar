@@ -123,6 +123,14 @@ export default function ARView() {
   const [diag, setDiag] = useState<DiagCounters>(freshDiag());
 
   const [phase, setPhase] = useState<Phase>("permission-gate");
+
+  // Remember the active station so Mode B's AR switch can land back on the
+  // right scan deep-link (sessionStorage: per-tab, survives the B round-trip).
+  useEffect(() => {
+    if (stationId) {
+      window.sessionStorage.setItem("tcsh:last-station", stationId);
+    }
+  }, [stationId]);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [opencvReady, setOpencvReady] = useState(false);
