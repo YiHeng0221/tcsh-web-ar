@@ -1,150 +1,155 @@
 """Router-level coverage for the textures domain.
 
-The texture router doesn't touch the DB — it brokers a Supabase Storage
-signed URL. We override `get_storage` with a fake to keep the test
-hermetic; status-code paths are the contract under test.
+After the migration the texture router streams a multipart upload through
+`POST /textures` (admin-only), persists the bytes to the local filesystem,
+and serves them back at `GET /textures/{id}/file`. These tests run against
+the in-memory SQLite session (via the shared `client` fixture) with the
+texture storage dir pointed at a tmp path so real bytes land on disk.
+
+Auth is the single-admin model: a valid admin token (the conftest default)
+passes; a token that doesn't resolve to the admin or a missing token is
+rejected with 401 — there is no separate 403 role gate.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
-from unittest.mock import AsyncMock
+from collections.abc import Callable, Iterator
+from pathlib import Path
 
-import pytest_asyncio
+import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from tcsh_ar_api.textures.exceptions import StorageError
-from tcsh_ar_api.textures.storage import SignedUpload, get_storage
+from tcsh_ar_api.config import Settings, get_settings
+
+# Minimal payloads whose magic bytes the `filetype` library recognises.
+_PNG = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + b"\x00" * 64
+_JPEG = bytes([0xFF, 0xD8, 0xFF, 0xE0]) + b"\x00" * 64
 
 
-def _make_signed_upload() -> SignedUpload:
-    return SignedUpload(
-        upload_url="https://example.test/storage/signed/abc",
-        storage_path="abc/def.webp",
-        token="header.payload.signature",
+@pytest.fixture
+def storage_settings(app: FastAPI, tmp_path: Path) -> Iterator[Settings]:
+    """Override `get_settings` so uploads write into a tmp dir with a known
+    allow-list / size cap. Restored on teardown so other tests aren't polluted.
+    """
+    settings = Settings(
+        texture_allowed_mimes=["image/jpeg", "image/png", "image/webp"],
+        texture_max_size_bytes=1024 * 1024,
+        texture_storage_dir=tmp_path / "textures",
     )
+    app.dependency_overrides[get_settings] = lambda: settings
+    yield settings
+    app.dependency_overrides.pop(get_settings, None)
 
 
-@pytest_asyncio.fixture
-async def storage_mock(app: FastAPI) -> AsyncIterator[AsyncMock]:
-    """Override the `get_storage` dependency with an AsyncMock for the test."""
-    mock = AsyncMock()
-    mock.create_upload_url.return_value = _make_signed_upload()
-
-    def _override() -> AsyncMock:
-        return mock
-
-    app.dependency_overrides[get_storage] = _override
-    try:
-        yield mock
-    finally:
-        app.dependency_overrides.pop(get_storage, None)
-
-
-async def test_create_upload_url_happy_path(
-    client: AsyncClient,
-    storage_mock: AsyncMock,
+async def test_upload_happy_path(
+    client: AsyncClient, storage_settings: Settings
 ) -> None:
     response = await client.post(
-        "/textures/upload-url",
-        json={"filename": "painting.webp", "mime": "image/webp", "size_bytes": 2048},
+        "/textures",
+        files={"file": ("painting.png", _PNG, "image/png")},
+        data={"label": "Painting"},
     )
-    assert response.status_code == 200, response.text
+    assert response.status_code == 201, response.text
     body = response.json()
-    assert body["upload_url"].startswith("https://")
-    assert body["storage_path"] == "abc/def.webp"
-    assert body["token"] == "header.payload.signature"
-    assert isinstance(body["expires_at"], int)
-    storage_mock.create_upload_url.assert_awaited_once_with("painting.webp")
+    assert body["label"] == "Painting"
+    assert body["filename"] == "painting.png"
+    assert body["mime_type"] == "image/png"
+    assert body["size_bytes"] == len(_PNG)
+    assert body["file_url"] == f"/textures/{body['id']}/file"
+
+    # The served file round-trips the original bytes.
+    fetched = await client.get(body["file_url"])
+    assert fetched.status_code == 200
+    assert fetched.content == _PNG
 
 
 async def test_unsupported_mime_returns_415(
-    client: AsyncClient,
-    storage_mock: AsyncMock,
+    client: AsyncClient, storage_settings: Settings
 ) -> None:
     response = await client.post(
-        "/textures/upload-url",
-        json={"filename": "evil.svg", "mime": "image/svg+xml", "size_bytes": 10},
+        "/textures",
+        files={"file": ("evil.svg", b"<svg/>", "image/svg+xml")},
     )
     assert response.status_code == 415
-    storage_mock.create_upload_url.assert_not_called()
 
 
 async def test_oversized_file_returns_413(
-    client: AsyncClient,
-    storage_mock: AsyncMock,
+    client: AsyncClient, storage_settings: Settings
 ) -> None:
-    huge = 50 * 1024 * 1024
+    huge = _PNG[:8] + b"\x00" * (storage_settings.texture_max_size_bytes + 1)
     response = await client.post(
-        "/textures/upload-url",
-        json={"filename": "huge.png", "mime": "image/png", "size_bytes": huge},
+        "/textures",
+        files={"file": ("huge.png", huge, "image/png")},
     )
     assert response.status_code == 413
-    storage_mock.create_upload_url.assert_not_called()
 
 
-async def test_requires_admin(
+async def test_empty_file_returns_400(
+    client: AsyncClient, storage_settings: Settings
+) -> None:
+    response = await client.post(
+        "/textures",
+        files={"file": ("empty.png", b"", "image/png")},
+    )
+    assert response.status_code == 400
+
+
+async def test_magic_byte_mismatch_returns_415(
+    client: AsyncClient, storage_settings: Settings
+) -> None:
+    """Declared `image/png` but the bytes are a JPEG — must be rejected."""
+    response = await client.post(
+        "/textures",
+        files={"file": ("liar.png", _JPEG, "image/png")},
+    )
+    assert response.status_code == 415
+
+
+async def test_upload_rejects_non_admin_token(
     client: AsyncClient,
-    storage_mock: AsyncMock,
+    storage_settings: Settings,
     as_regular: Callable[[], None],
 ) -> None:
+    """Single-admin model: a token that doesn't resolve to the admin → 401."""
     as_regular()
     response = await client.post(
-        "/textures/upload-url",
-        json={"filename": "x.png", "mime": "image/png", "size_bytes": 10},
+        "/textures",
+        files={"file": ("x.png", _PNG, "image/png")},
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
-async def test_requires_token(
+async def test_upload_requires_token(
     client: AsyncClient,
-    storage_mock: AsyncMock,
+    storage_settings: Settings,
     as_anonymous: Callable[[], None],
 ) -> None:
     as_anonymous()
     response = await client.post(
-        "/textures/upload-url",
-        json={"filename": "x.png", "mime": "image/png", "size_bytes": 10},
+        "/textures",
+        files={"file": ("x.png", _PNG, "image/png")},
     )
     assert response.status_code == 401
     assert response.headers.get("www-authenticate", "").lower().startswith("bearer")
 
 
-async def test_storage_failure_returns_502(
+async def test_list_is_publicly_readable(
     client: AsyncClient,
-    storage_mock: AsyncMock,
+    storage_settings: Settings,
+    as_anonymous: Callable[[], None],
 ) -> None:
-    """When the Supabase SDK raises (or returns malformed shape), the API surfaces
-    a 502 with a generic detail — no SDK leakage."""
-    storage_mock.create_upload_url.side_effect = StorageError()
-    response = await client.post(
-        "/textures/upload-url",
-        json={"filename": "x.png", "mime": "image/png", "size_bytes": 10},
-    )
-    assert response.status_code == 502
-    # `StorageError` default detail must surface verbatim — sensitive details
-    # from the SDK should NOT have been threaded through.
-    assert response.json()["detail"] == "storage backend error"
+    """Reads aren't behind require_admin — anonymous list is fine."""
+    as_anonymous()
+    response = await client.get("/textures")
+    assert response.status_code == 200
+    assert response.json() == []
 
 
-async def test_validation_rejects_empty_filename(
-    client: AsyncClient,
-    storage_mock: AsyncMock,
+async def test_get_unknown_texture_returns_404(
+    client: AsyncClient, storage_settings: Settings
 ) -> None:
-    response = await client.post(
-        "/textures/upload-url",
-        json={"filename": "", "mime": "image/png", "size_bytes": 10},
-    )
-    assert response.status_code == 422
+    from uuid import uuid4
 
-
-async def test_validation_rejects_non_positive_size(
-    client: AsyncClient,
-    storage_mock: AsyncMock,
-) -> None:
-    response = await client.post(
-        "/textures/upload-url",
-        json={"filename": "x.png", "mime": "image/png", "size_bytes": 0},
-    )
-    assert response.status_code == 422
+    response = await client.get(f"/textures/{uuid4()}")
+    assert response.status_code == 404
