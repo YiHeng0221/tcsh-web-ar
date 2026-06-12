@@ -30,7 +30,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { closeArCamera, openArCamera } from "@/lib/ar/camera";
 import {
@@ -54,6 +54,37 @@ import { usePlacements } from "../usePlacements";
 
 type Phase = "permission-gate" | "scanning" | "viewing";
 
+/**
+ * Field-debug counters (HUD enabled with `?debug=1`). Mutated from the
+ * hot detection path via ref (no re-renders); a 2Hz interval snapshots
+ * them into state. The HUD exists because every failure mode of the
+ * scan→solve pipeline is silent by design (keep scanning, never crash) —
+ * on a real device we need the phone itself to say which gate rejects.
+ */
+type DiagCounters = {
+  attempts: number;
+  decodes: number;
+  foreign: number;
+  noCorners: number;
+  cvNotReady: number;
+  solveRejected: number;
+  solveOk: number;
+  lastStation: string | null;
+  lastReprojPx: number | null;
+};
+
+const freshDiag = (): DiagCounters => ({
+  attempts: 0,
+  decodes: 0,
+  foreign: 0,
+  noCorners: 0,
+  cvNotReady: 0,
+  solveRejected: 0,
+  solveOk: 0,
+  lastStation: null,
+  lastReprojPx: null,
+});
+
 /** QR scan throttle while viewing — low-frequency recalibration (spec §0.5). */
 const VIEWING_SCAN_THROTTLE_MS = 500; // ~2fps
 
@@ -67,10 +98,18 @@ const QR_SIZE_MM = MOCK_QR_SIZE_MM;
 
 export default function ARView() {
   const navigate = useNavigate();
+  const location = useLocation();
   const params = useParams<{ stationId: string }>();
   const [stationId, setStationId] = useState<string | undefined>(
     params.stationId,
   );
+  // Field-debug HUD, opt-in via ?debug=1 (kept across the session).
+  const debugEnabled = useMemo(
+    () => new URLSearchParams(location.search).get("debug") === "1",
+    [location.search],
+  );
+  const diagRef = useRef<DiagCounters>(freshDiag());
+  const [diag, setDiag] = useState<DiagCounters>(freshDiag());
 
   const [phase, setPhase] = useState<Phase>("permission-gate");
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -122,22 +161,35 @@ export default function ARView() {
       if (!mountedRef.current) return;
       const cv = cvRef.current;
       const video = videoRef.current;
-      if (
-        detection.payload.kind !== "station" ||
-        !detection.corners ||
-        !cv ||
-        !video
-      ) {
+      const diag = diagRef.current;
+      diag.decodes += 1;
+      if (detection.payload.kind !== "station") {
+        diag.foreign += 1;
         return;
       }
+      if (!detection.corners) {
+        diag.noCorners += 1;
+        return;
+      }
+      if (!cv) {
+        diag.cvNotReady += 1;
+        return;
+      }
+      if (!video) return;
 
       const detectedStation = detection.payload.stationId;
+      diag.lastStation = detectedStation;
       const w = video.videoWidth;
       const h = video.videoHeight;
       if (w === 0 || h === 0) return;
 
       const pose = solveQrPose(cv, detection.corners, QR_SIZE_MM, w, h);
-      if (!pose) return; // reproj gate failed — don't snap a bad solve
+      if (!pose) {
+        diag.solveRejected += 1;
+        return; // reproj gate failed — don't snap a bad solve
+      }
+      diag.solveOk += 1;
+      diag.lastReprojPx = pose.reprojErrorPx;
 
       // A different station's QR entered frame → re-anchor to it (spec §0.5:
       // "不同站 QR = 換錨, placements 換站重取"). Reset fusion so we don't
@@ -297,6 +349,9 @@ export default function ARView() {
     const detector = new QrDetector({
       throttleMs: phase === "viewing" ? VIEWING_SCAN_THROTTLE_MS : 100,
       onDetection: handleDetection,
+      onAttempt: () => {
+        diagRef.current.attempts += 1;
+      },
     });
     detector.start(video);
     detectorRef.current = detector;
@@ -318,6 +373,15 @@ export default function ARView() {
     }, 1000);
     return () => window.clearInterval(id);
   }, [phase]);
+
+  // ── Debug HUD: snapshot the hot-path counters at 2Hz ──────────────────────
+  useEffect(() => {
+    if (!debugEnabled) return;
+    const id = window.setInterval(() => {
+      setDiag({ ...diagRef.current });
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [debugEnabled]);
 
   // ── Capture the intrinsic video size once metadata arrives ────────────────
   const handleVideoMeta = useCallback(() => {
@@ -427,6 +491,28 @@ export default function ARView() {
               相機或方位權限未授予。請到瀏覽器設定允許後再試一次。
             </p>
           )}
+        </div>
+      )}
+
+      {/* Field-debug HUD (?debug=1) — which silent gate is rejecting? */}
+      {debugEnabled && (
+        <div className="safe-area pointer-events-none absolute inset-x-0 bottom-0 z-50 px-3 pb-3 font-mono text-[10px] leading-tight text-lime-300">
+          <div className="rounded bg-black/70 p-2">
+            <div>
+              phase={phase} cv={opencvReady ? "ready" : "loading"} video=
+              {videoSize ? `${videoSize.w}×${videoSize.h}` : "—"} station=
+              {stationId ?? "—"}
+            </div>
+            <div>
+              attempts={diag.attempts} decodes={diag.decodes} foreign=
+              {diag.foreign} noCorners={diag.noCorners} cvWait={diag.cvNotReady}
+            </div>
+            <div>
+              solveOk={diag.solveOk} solveRej={diag.solveRejected} reproj=
+              {diag.lastReprojPx != null ? diag.lastReprojPx.toFixed(1) : "—"}px
+              lastQR={diag.lastStation ?? "—"}
+            </div>
+          </div>
         </div>
       )}
 

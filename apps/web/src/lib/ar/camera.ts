@@ -13,8 +13,13 @@
  */
 
 const TRACKING_VIDEO: MediaTrackConstraints = {
-  width: { ideal: 1280 },
-  height: { ideal: 720 },
+  // 1080p, not 720p: on iPhones the 1280×720 capture mode maps to a
+  // tighter sensor crop (noticeably "zoomed in" vs the native camera
+  // app), which makes aiming at a ground QR awkward. 1920×1080 keeps
+  // the wide FOV of the main lens; intrinsics in coords.ts scale with
+  // the actual frame width, so pose math is unaffected.
+  width: { ideal: 1920 },
+  height: { ideal: 1080 },
 };
 
 export async function openArCamera(): Promise<MediaStream> {

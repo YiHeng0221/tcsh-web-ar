@@ -125,6 +125,12 @@ export type QrDetectorOptions = {
   qrDimension?: number;
   /** Called on every successful decode (throttled). */
   onDetection: (detection: QrDetection) => void;
+  /**
+   * Called on every decode attempt (throttled), success or not — lets a
+   * debug HUD distinguish "loop not running" from "running but no QR
+   * found". Keep the body trivial; this fires ~10×/s while scanning.
+   */
+  onAttempt?: (decoded: boolean) => void;
 };
 
 /**
@@ -138,6 +144,7 @@ export class QrDetector {
   private readonly throttleMs: number;
   private readonly qrDimension: number;
   private readonly onDetection: (d: QrDetection) => void;
+  private readonly onAttempt?: (decoded: boolean) => void;
 
   private video: HTMLVideoElement | null = null;
   private running = false;
@@ -149,6 +156,7 @@ export class QrDetector {
     this.throttleMs = opts.throttleMs ?? DEFAULT_THROTTLE_MS;
     this.qrDimension = opts.qrDimension ?? DEFAULT_QR_DIMENSION;
     this.onDetection = opts.onDetection;
+    this.onAttempt = opts.onAttempt;
   }
 
   start(video: HTMLVideoElement): void {
@@ -189,9 +197,14 @@ export class QrDetector {
       result = this.reader.decode(this.video);
     } catch {
       // NotFoundException etc. — no QR this frame, normal. Keep scanning.
+      this.onAttempt?.(false);
       return;
     }
-    if (!result) return;
+    if (!result) {
+      this.onAttempt?.(false);
+      return;
+    }
+    this.onAttempt?.(true);
     const text = result.getText();
     const payload = parseStationPayload(text);
     const corners =
