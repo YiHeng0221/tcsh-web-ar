@@ -20,6 +20,11 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: { "@": path.resolve(__dirname, "src") },
     },
+    worker: {
+      // The solvePnP worker dynamic-imports the OpenCV chunk; rollup can
+      // only code-split workers in ES format (default iife errors out).
+      format: "es" as const,
+    },
     server: {
       // HTTPS-only: bind 0.0.0.0 so phones on LAN can reach the dev server
       host: useHttps ? true : undefined,
