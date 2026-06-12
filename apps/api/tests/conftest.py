@@ -2,32 +2,35 @@
 
 Strategy
 --------
-Tests that touch the DB run against a real Postgres spun up once per session
-via testcontainers. After each test we TRUNCATE every mutable domain table
-so the next test starts clean. We tried the nested-SAVEPOINT pattern (each
-test joining an outer rollback-only transaction) — it falls apart under the
-service layer's `commit()` calls because the asyncpg dialect surfaces
-"MissingGreenlet" when SAVEPOINTs cycle outside the async greenlet context.
-TRUNCATE is the boring-but-reliable choice; the suite still runs in seconds.
+After the Supabase → SQLite migration the suite runs entirely against an
+in-memory SQLite database (aiosqlite). One shared connection is held open
+for the whole session via SQLAlchemy's ``StaticPool`` so the ``:memory:``
+database survives between checkouts — a fresh aiosqlite connection would
+otherwise get its own empty database. The schema is created once per session
+from ``Base.metadata``; each test is isolated by ``DELETE``-ing every mutable
+domain table on teardown (SQLite has no ``TRUNCATE ... CASCADE``).
 
-Mocking the DB was rejected for two reasons:
+Why real SQLite rather than mocking the DB:
 
-1. The integrity classifiers in `*/service.py` branch on asyncpg-specific
-   `sqlstate` values; SQLite would not surface those at all.
-2. JSONB columns (`anchors.world_pos`, `placements.transform`) are part of
-   the wire contract — we want round-tripping through real Postgres.
+1. The integrity classifiers in ``db/integrity.py`` branch on the SQLite
+   driver's error *message* ("UNIQUE constraint failed", "FOREIGN KEY
+   constraint failed"); only a real connection surfaces those.
+2. The JSON columns (``anchors.world_pos``, ``placements.transform``) are
+   part of the wire contract — we want round-tripping through a real engine.
 
-Auth fixtures override `get_current_user` / `require_admin` directly; we
-don't try to mint real Supabase JWTs. The JWT verification path itself is
-covered by `tests/auth/test_jwt_service.py` and `test_dependencies.py`.
+Auth is the local single-admin model (HS256 JWT, no user table). The
+``require_admin`` / ``get_current_admin`` dependency is overridden directly
+so route tests can flip between "admin", "non-admin token" and "anonymous"
+without minting real JWTs. The JWT verify/mint path itself is covered by
+``tests/auth/test_jwt_service.py`` and ``tests/auth/test_auth_router.py``.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4  # noqa: F401 — uuid4 kept for test helpers' convenience
 
 import pytest
 import pytest_asyncio
@@ -39,52 +42,49 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from testcontainers.postgres import PostgresContainer
+from sqlalchemy.pool import StaticPool
 
-# Auth env must be in place before tcsh_ar_api.config caches Settings — the
-# import of `main` triggers `get_jwt_service()` in the lifespan, which checks
-# these. They're only read at boot; the JWT path is fully overridden below.
-os.environ.setdefault("SUPABASE_URL", "https://test.supabase.test")
-os.environ.setdefault(
-    "SUPABASE_JWKS_URL",
-    "https://test.supabase.test/auth/v1/.well-known/jwks.json",
-)
-os.environ.setdefault("SUPABASE_SECRET_KEY", "sb_secret_test_only")
-os.environ.setdefault("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test_only")
-
-
-@pytest.fixture(scope="session")
-def postgres_container() -> Generator[PostgresContainer, None, None]:
-    """One shared Postgres for the whole test run.
-
-    asyncpg needs the URL scheme rewritten — testcontainers hands back a
-    psycopg2-style `postgresql+psycopg2://` URL by default.
-    """
-    container = PostgresContainer("postgres:16-alpine", driver=None)
-    with container as pg:
-        yield pg
-
-
-@pytest.fixture(scope="session")
-def database_url(postgres_container: PostgresContainer) -> str:
-    raw = postgres_container.get_connection_url()
-    # `get_connection_url` returns either `postgresql://...` or
-    # `postgresql+psycopg2://...` depending on testcontainers version.
-    if raw.startswith("postgresql+"):
-        _, rest = raw.split("://", 1)
-        return f"postgresql+asyncpg://{rest}"
-    return raw.replace("postgresql://", "postgresql+asyncpg://", 1)
+# Local-auth env must be in place before tcsh_ar_api.config caches Settings —
+# importing `main` triggers the lifespan, which reads JWT_SECRET / ADMIN_*.
+# These are only read at boot; the auth dependency is fully overridden below.
+os.environ.setdefault("APP_ENV", "development")
+os.environ.setdefault("JWT_SECRET", "test-secret-32-bytes-pad-pad-pad-pad")
+os.environ.setdefault("ADMIN_EMAIL", "admin@example.test")
+os.environ.setdefault("ADMIN_PASSWORD_HASH", "")
+# In-memory SQLite for the test DB; overridden below via a StaticPool engine,
+# but the env default keeps `db.session` import-safe if it's ever touched.
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
-async def engine(database_url: str) -> AsyncIterator[Any]:
-    """Engine bound to the test container; schema is created once per session."""
-    # Late import so the SUPABASE_* env defaults above land in Settings before
-    # `tcsh_ar_api.db.session` evaluates `_settings.database_url`.
+async def engine() -> AsyncIterator[Any]:
+    """One in-memory SQLite engine for the whole run.
+
+    ``StaticPool`` + a single shared connection keep the ``:memory:`` database
+    alive across sessions; without it every checkout would see an empty DB.
+    """
+    # Late import so the env defaults above land in Settings before any model
+    # metadata is evaluated.
+    from sqlalchemy import event
+
     from tcsh_ar_api.db import models as _models  # noqa: F401 — register mappers
     from tcsh_ar_api.db.base import Base
 
-    test_engine = create_async_engine(database_url, future=True)
+    test_engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        future=True,
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+
+    # SQLite enforces foreign keys only when asked — required for the
+    # CASCADE / SET NULL clauses the integrity tests exercise.
+    @event.listens_for(test_engine.sync_engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection: Any, _record: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     try:
@@ -95,18 +95,12 @@ async def engine(database_url: str) -> AsyncIterator[Any]:
 
 @pytest_asyncio.fixture
 async def db_session(engine: Any) -> AsyncIterator[AsyncSession]:
-    """One AsyncSession per test, isolated by truncating mutable tables on teardown.
+    """One AsyncSession per test, isolated by deleting mutable tables on teardown.
 
-    A nested-savepoint pattern is the prettier choice in theory, but
-    SQLAlchemy 2.0's asyncpg dialect frequently trips on "MissingGreenlet"
-    when a service-layer `commit()` releases a SAVEPOINT and the next
-    statement tries to re-open one through the same connection. Truncating
-    on teardown is slower per test (a TRUNCATE per domain table) but is
-    the only approach that worked reliably under asyncpg + commit()-heavy
-    services. Test runtime is still under a few seconds.
+    SQLite has no ``TRUNCATE ... CASCADE``; we ``DELETE`` in FK-safe order
+    (placements → ar_objects → anchors → textures) instead. Fast enough that
+    the whole suite still runs in a couple of seconds.
     """
-    # SQLAlchemy convention: PascalCase for the session factory itself,
-    # snake_case for instances. Mirrors `db.session.SessionLocal` in src.
     SessionLocal = async_sessionmaker(  # noqa: N806
         bind=engine,
         expire_on_commit=False,
@@ -116,48 +110,38 @@ async def db_session(engine: Any) -> AsyncIterator[AsyncSession]:
             yield session
         finally:
             await session.rollback()
-            # CASCADE handles FK order automatically; explicit table order here
-            # is for documentation clarity only (placements → objects → anchors → textures).
-            await session.execute(
-                _text(
-                    "TRUNCATE TABLE placements, ar_objects, anchors, textures "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            for table in ("placements", "ar_objects", "anchors", "textures"):
+                await session.execute(_text(f"DELETE FROM {table}"))
             await session.commit()
 
 
 # ── Auth identity fixtures ────────────────────────────────────────────────
-# `current_user` is the role the route sees once `get_current_user` /
-# `require_admin` are overridden. Default is admin so happy-path tests don't
-# have to opt in; tests that exercise the auth gate flip it explicitly.
+# `auth_state["user"]` is the identity the route sees once `require_admin` /
+# `get_current_admin` are overridden. Default is the admin so happy-path
+# tests don't have to opt in; tests that exercise the auth gate flip it.
+#
+# Single-admin model: a *valid* token always represents the admin, so there
+# is no "authenticated non-admin" identity. `as_regular` therefore stands in
+# for "a caller presenting a token that does not resolve to the admin" — in
+# the local-JWT implementation that surfaces as a rejected (invalid) token.
 
 
 @pytest.fixture
 def admin_user() -> dict[str, Any]:
-    from tcsh_ar_api.auth.schemas import CurrentUser
+    from tcsh_ar_api.auth.schemas import LocalUser
 
-    return CurrentUser(
-        id=str(uuid4()),
-        email="admin@example.test",
-        is_admin=True,
-    ).model_dump()
-
-
-@pytest.fixture
-def regular_user() -> dict[str, Any]:
-    from tcsh_ar_api.auth.schemas import CurrentUser
-
-    return CurrentUser(
-        id=str(uuid4()),
-        email="user@example.test",
-        is_admin=False,
-    ).model_dump()
+    return LocalUser(email="admin@example.test", is_admin=True).model_dump()
 
 
 @pytest.fixture
 def auth_state() -> dict[str, Any]:
-    """Mutable holder so individual tests can flip the active user mid-test."""
+    """Mutable holder so individual tests can flip the active caller mid-test.
+
+    Values:
+      - dict (a LocalUser dump) → resolves to that user
+      - "invalid" → simulate a token that fails verification (→ 401)
+      - None → simulate a missing bearer token (→ 401)
+    """
     return {"user": None}
 
 
@@ -170,49 +154,38 @@ async def app(
     """A FastAPI app instance with DB and auth dependencies overridden.
 
     `auth_state["user"]` controls who the route thinks is calling:
-      - dict with `is_admin=True` → admin
-      - dict with `is_admin=False` → regular user
-      - None → simulate missing / invalid bearer (raises 401)
+      - dict with `is_admin=True` → admin (happy path)
+      - "invalid" → token present but rejected → 401
+      - None → missing bearer token → 401
     """
     from fastapi import HTTPException
 
-    from tcsh_ar_api.auth.dependencies import get_current_user, require_admin
-    from tcsh_ar_api.auth.schemas import CurrentUser
+    from tcsh_ar_api.auth.dependencies import get_current_admin, require_admin
+    from tcsh_ar_api.auth.schemas import LocalUser
     from tcsh_ar_api.db.session import get_db
     from tcsh_ar_api.main import app as fastapi_app
 
     # Default to admin so the 90% happy path doesn't have to opt in.
     auth_state["user"] = admin_user
 
+    bearer_challenge = {"WWW-Authenticate": "Bearer"}
+
     async def _override_db() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
-    async def _override_get_current_user() -> CurrentUser:
+    async def _override_require_admin() -> LocalUser:
         user = auth_state["user"]
-        if user is None:
+        if user is None or user == "invalid":
             raise HTTPException(
                 status_code=401,
                 detail="missing bearer token",
-                headers={"WWW-Authenticate": "Bearer"},
+                headers=bearer_challenge,
             )
-        return CurrentUser(**user)
-
-    async def _override_require_admin() -> CurrentUser:
-        user = auth_state["user"]
-        if user is None:
-            raise HTTPException(
-                status_code=401,
-                detail="missing bearer token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        cu = CurrentUser(**user)
-        if not cu.is_admin:
-            raise HTTPException(status_code=403, detail="admin required")
-        return cu
+        return LocalUser(**user)
 
     fastapi_app.dependency_overrides[get_db] = _override_db
-    fastapi_app.dependency_overrides[get_current_user] = _override_get_current_user
     fastapi_app.dependency_overrides[require_admin] = _override_require_admin
+    fastapi_app.dependency_overrides[get_current_admin] = _override_require_admin
     try:
         yield fastapi_app
     finally:
@@ -238,11 +211,17 @@ def as_admin(auth_state: dict[str, Any], admin_user: dict[str, Any]) -> Callable
 
 
 @pytest.fixture
-def as_regular(
-    auth_state: dict[str, Any], regular_user: dict[str, Any]
-) -> Callable[[], None]:
+def as_regular(auth_state: dict[str, Any]) -> Callable[[], None]:
+    """Simulate a caller whose token does not resolve to the admin.
+
+    The single-admin model has no authenticated non-admin identity — a token
+    that isn't the admin's simply fails verification — so this maps to a
+    rejected token (401), the closest equivalent of the old "non-admin → 403"
+    gate from the Supabase two-tier role model.
+    """
+
     def _set() -> None:
-        auth_state["user"] = regular_user
+        auth_state["user"] = "invalid"
 
     return _set
 
@@ -319,16 +298,17 @@ def make_placement_payload() -> Callable[..., dict[str, Any]]:
 async def seeded_texture(db_session: AsyncSession) -> Any:
     """Insert a Texture row directly so placement tests can FK-reference it.
 
-    Bypasses the texture router on purpose — that endpoint signs an upload
-    URL and doesn't insert into `textures` (Supabase Storage triggers do).
+    Uses the local-filesystem texture model fields (label / filename /
+    mime_type / size_bytes); no bytes are written to disk because placement
+    tests only need the row's UUID for the foreign key.
     """
     from tcsh_ar_api.textures.models import Texture
 
     tex = Texture(
-        storage_path=f"{uuid4()}/seed.webp",
-        mime="image/webp",
+        label="seed",
+        filename="seed.webp",
+        mime_type="image/webp",
         size_bytes=1024,
-        original_filename="seed.webp",
     )
     db_session.add(tex)
     await db_session.flush()

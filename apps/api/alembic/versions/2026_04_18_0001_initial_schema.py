@@ -10,12 +10,20 @@ foreign-key relationships.
 Manually authored rather than `--autogenerate`d; equivalent output. Once
 an actual dev DB is available, `alembic upgrade head` should produce the
 schema described by the SQLAlchemy models under src/tcsh_ar_api/*/models.py.
+
+Types are dialect-portable (GUID + JSON) so the same migration runs on
+SQLite (default for dev) and on Postgres (if deployment ever swaps back).
+
+Texture storage is local-filesystem (see settings.texture_storage_dir);
+the row carries enough metadata to serve the file via
+``GET /textures/{id}/file`` without storing an absolute path.
 """
 from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
+
+from tcsh_ar_api.db.base import GUID
 
 revision: str = "0001"
 down_revision: str | None = None
@@ -28,13 +36,13 @@ def upgrade() -> None:
         "anchors",
         sa.Column(
             "id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             primary_key=True,
             nullable=False,
         ),
         sa.Column("label", sa.String(length=64), nullable=False, unique=True),
         sa.Column("size_mm", sa.Integer(), nullable=False),
-        sa.Column("world_pos", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("world_pos", sa.JSON(), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -53,7 +61,7 @@ def upgrade() -> None:
         "ar_objects",
         sa.Column(
             "id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             primary_key=True,
             nullable=False,
         ),
@@ -77,14 +85,14 @@ def upgrade() -> None:
         "textures",
         sa.Column(
             "id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             primary_key=True,
             nullable=False,
         ),
-        sa.Column("storage_path", sa.String(length=512), nullable=False, unique=True),
-        sa.Column("mime", sa.String(length=64), nullable=False),
+        sa.Column("label", sa.String(length=256), nullable=False),
+        sa.Column("filename", sa.String(length=256), nullable=False),
+        sa.Column("mime_type", sa.String(length=64), nullable=False),
         sa.Column("size_bytes", sa.BigInteger(), nullable=False),
-        sa.Column("original_filename", sa.String(length=256), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -103,30 +111,30 @@ def upgrade() -> None:
         "placements",
         sa.Column(
             "id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             primary_key=True,
             nullable=False,
         ),
         sa.Column(
             "ar_object_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("ar_objects.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "anchor_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("anchors.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "texture_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("textures.id", ondelete="SET NULL"),
             nullable=True,
         ),
-        sa.Column("transform", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-        sa.Column("uv_transform", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("transform", sa.JSON(), nullable=False),
+        sa.Column("uv_transform", sa.JSON(), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),

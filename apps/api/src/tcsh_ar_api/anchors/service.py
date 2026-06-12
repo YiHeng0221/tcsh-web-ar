@@ -11,10 +11,7 @@ from tcsh_ar_api.anchors.exceptions import (
 from tcsh_ar_api.anchors.models import Anchor
 from tcsh_ar_api.anchors.repository import AnchorRepository
 from tcsh_ar_api.anchors.schemas import AnchorCreate, AnchorUpdate
-
-# Postgres SQLSTATE codes — see https://www.postgresql.org/docs/current/errcodes-appendix.html
-_SQLSTATE_FOREIGN_KEY_VIOLATION = "23503"
-_SQLSTATE_UNIQUE_VIOLATION = "23505"
+from tcsh_ar_api.db.integrity import IntegrityCause, classify_integrity_error
 
 
 class AnchorService:
@@ -61,24 +58,21 @@ class AnchorService:
         except IntegrityError as exc:
             await self.repo.session.rollback()
             # Placements FK-reference anchors; attempting to delete a still-
-            # referenced anchor surfaces as 23503. Anything else is genuinely
-            # unexpected and should not be silently downgraded to 409.
-            if _sqlstate(exc) == _SQLSTATE_FOREIGN_KEY_VIOLATION:
+            # referenced anchor surfaces as a FK violation. Anything else is
+            # genuinely unexpected and should not be silently downgraded to
+            # 409.
+            if classify_integrity_error(exc) is IntegrityCause.FOREIGN_KEY_VIOLATION:
                 raise AnchorInUseError() from exc
             raise
 
 
-def _sqlstate(exc: IntegrityError) -> str | None:
-    return getattr(getattr(exc, "orig", None), "sqlstate", None)
-
-
 def _classify_integrity_error_for_mutation(exc: IntegrityError) -> NoReturn:
-    """Only unique_violation becomes the domain 409; other SQLSTATEs re-raise.
+    """Only unique violations become the domain 409; everything else re-raises.
 
     create/update previously treated any IntegrityError as a label conflict,
     which would hide NOT NULL / CHECK / deferred-FK failures behind a 409
     and mislead admin tooling. We only own the unique-on-label case.
     """
-    if _sqlstate(exc) == _SQLSTATE_UNIQUE_VIOLATION:
+    if classify_integrity_error(exc) is IntegrityCause.UNIQUE_VIOLATION:
         raise AnchorLabelConflictError() from exc
     raise exc

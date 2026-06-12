@@ -105,15 +105,21 @@ async def test_delete_404_for_unknown_anchor(client: AsyncClient) -> None:
     assert response.status_code == 404
 
 
-async def test_create_requires_admin(
+async def test_create_rejects_non_admin_token(
     client: AsyncClient,
     make_anchor_payload: Callable[..., dict[str, Any]],
     as_regular: Callable[[], None],
 ) -> None:
+    """A caller whose token doesn't resolve to the admin is rejected.
+
+    Single-admin model: there is no authenticated non-admin identity, so a
+    token that isn't the admin's fails verification (401) rather than passing
+    auth and tripping a separate 403 role gate.
+    """
     as_regular()
     response = await client.post("/anchors", json=make_anchor_payload(label="Forbidden"))
-    assert response.status_code == 403
-    assert response.json()["detail"] == "admin required"
+    assert response.status_code == 401
+    assert response.headers.get("www-authenticate", "").lower().startswith("bearer")
 
 
 async def test_create_requires_token(

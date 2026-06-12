@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 
 from tcsh_ar_api.anchors.repository import AnchorRepository
+from tcsh_ar_api.db.integrity import IntegrityCause, classify_integrity_error
 from tcsh_ar_api.objects.exceptions import (
     ARObjectAnchorFilterError,
     ARObjectConflictError,
@@ -13,9 +14,6 @@ from tcsh_ar_api.objects.exceptions import (
 from tcsh_ar_api.objects.models import ARObject
 from tcsh_ar_api.objects.repository import ARObjectRepository
 from tcsh_ar_api.objects.schemas import ARObjectCreate, ARObjectUpdate
-
-_SQLSTATE_FOREIGN_KEY_VIOLATION = "23503"
-_SQLSTATE_UNIQUE_VIOLATION = "23505"
 
 
 class ARObjectService:
@@ -73,25 +71,21 @@ class ARObjectService:
         except IntegrityError as exc:
             await self.repo.session.rollback()
             # Placements FK-reference ar_objects; attempting to delete a
-            # still-referenced object surfaces as 23503. Anything else is
-            # unexpected and should not be masked behind a 409.
-            if _sqlstate(exc) == _SQLSTATE_FOREIGN_KEY_VIOLATION:
+            # still-referenced object surfaces as a FK violation. Anything
+            # else is unexpected and should not be masked behind a 409.
+            if classify_integrity_error(exc) is IntegrityCause.FOREIGN_KEY_VIOLATION:
                 raise ARObjectInUseError() from exc
             raise
 
 
-def _sqlstate(exc: IntegrityError) -> str | None:
-    return getattr(getattr(exc, "orig", None), "sqlstate", None)
-
-
 def _classify_mutation_integrity_error(exc: IntegrityError) -> NoReturn:
-    """Only unique_violation maps to 409; other SQLSTATEs re-raise unchanged.
+    """Only unique violations map to 409; everything else re-raises unchanged.
 
     ar_objects has no unique constraint today, but the conflict class is
     reserved so future unique fields surface as 409 rather than 500. Keeping
-    the classifier sqlstate-aware prevents NOT NULL / CHECK / deferred FK
+    the classifier dialect-aware prevents NOT NULL / CHECK / deferred FK
     failures from being misreported.
     """
-    if _sqlstate(exc) == _SQLSTATE_UNIQUE_VIOLATION:
+    if classify_integrity_error(exc) is IntegrityCause.UNIQUE_VIOLATION:
         raise ARObjectConflictError() from exc
     raise exc

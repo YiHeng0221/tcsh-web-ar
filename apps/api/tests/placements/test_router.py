@@ -259,19 +259,22 @@ async def test_delete_404_for_unknown_placement(client: AsyncClient) -> None:
     assert response.status_code == 404
 
 
-async def test_create_requires_admin(
+async def test_create_rejects_non_admin_token(
     client: AsyncClient,
     object_id: str,
     anchor_id: str,
     make_placement_payload: Callable[..., dict[str, Any]],
     as_regular: Callable[[], None],
 ) -> None:
+    """Single-admin model: a token that doesn't resolve to the admin is
+    rejected (401), not passed-then-403'd."""
     as_regular()
     response = await client.post(
         "/placements",
         json=make_placement_payload(ar_object_id=object_id, anchor_id=anchor_id),
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
+    assert response.headers.get("www-authenticate", "").lower().startswith("bearer")
 
 
 async def test_create_requires_token(

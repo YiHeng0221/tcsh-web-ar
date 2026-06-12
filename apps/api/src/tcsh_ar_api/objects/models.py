@@ -5,10 +5,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from tcsh_ar_api.db.base import Base
+from tcsh_ar_api.db.base import GUID, Base
 
 if TYPE_CHECKING:
     from tcsh_ar_api.placements.models import Placement
@@ -24,7 +23,7 @@ class ARObject(Base):
     __tablename__ = "ar_objects"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        GUID(), primary_key=True, default=uuid.uuid4
     )
     label: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

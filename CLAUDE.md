@@ -71,7 +71,15 @@ spec via `openapi-typescript`. Do not hand-write matching TS types.
 - ASGI server (prod): **uvicorn** behind a reverse proxy, or **gunicorn**
   with uvicorn workers
 - Validation / schemas: **Pydantic v2** (+ `pydantic-settings` for config)
-- DB client: **SQLAlchemy 2.0** (async) + **`asyncpg`** driver
+- DB client: **SQLAlchemy 2.0** (async) + **`aiosqlite`** driver
+  (relational data lives in a local SQLite file by default; the API is
+  fully self-hosted now — no Supabase, no managed Auth, no managed
+  Storage)
+- Auth: single-admin **bcrypt + HS256 JWT** (`pyjwt` + the canonical
+  `bcrypt` module). One admin identity configured via env vars; no user
+  table.
+- Binary storage: **local filesystem** under
+  `apps/api/storage/textures/`, served back via `GET /textures/{id}/file`.
 - Migrations: **Alembic**
 - Lint / format: **Ruff** (lint + format, replaces Black + isort + flake8)
 - Type check: **mypy** (strict on `src/tcsh_ar_api/`)
@@ -79,11 +87,19 @@ spec via `openapi-typescript`. Do not hand-write matching TS types.
 
 ### Infrastructure
 
-- Managed DB + Auth + Storage: **Supabase**
-  - Postgres URL used via `DATABASE_URL` (direct connection for migrations,
-    pooled for runtime).
-  - Auth: Supabase issues JWTs; FastAPI verifies via the JWKS endpoint.
-  - Storage: Supabase Storage SDK used from FastAPI to sign upload URLs.
+- Auth: **local single-admin** — env vars `ADMIN_EMAIL` +
+  `ADMIN_PASSWORD_HASH` (bcrypt) + `JWT_SECRET`. POST `/auth/login`
+  mints HS256 JWTs; `/auth/me` and every mutating route verify them.
+  No user table, no managed auth provider.
+- Binary storage: **local filesystem** at `TEXTURE_STORAGE_DIR`
+  (default `apps/api/storage/textures/`). Uploads go through
+  `POST /textures` (multipart/form-data); the API persists the bytes
+  and serves them back at `GET /textures/{id}/file`. Reads are
+  unauthenticated; mutations are admin-only.
+- Relational data: **SQLite** via `aiosqlite` (file path configured by
+  `DATABASE_URL`, defaults to `apps/api/tcsh.db`). Models use the
+  dialect-portable `GUID` TypeDecorator + SQLAlchemy `JSON` type, so
+  swapping back to Postgres later is a `DATABASE_URL` change.
 - Containerization: **Docker** (multi-stage builds) + **Docker Compose**
   for dev
 - Orchestration: **Makefile** at repo root
@@ -95,8 +111,10 @@ spec via `openapi-typescript`. Do not hand-write matching TS types.
 - **uv over Poetry:** migrated 2026-04-18 — an order of magnitude faster,
   standard `[project]` table, single static binary. See
   [`docs/dev-journal/2026-04-18-poetry-to-uv-migration.md`](docs/dev-journal/2026-04-18-poetry-to-uv-migration.md).
-- **Supabase:** removes ops surface (self-hosted Postgres + S3 + auth
-  service) — one dashboard, one bill.
+- **Self-hosted (no Supabase):** at this scale a single admin + a few
+  hundred MB of texture files doesn't justify a managed auth + storage
+  bill. One env-var-driven admin and `FileResponse`-served textures keeps
+  ops surface minimal — swap back if multi-user becomes a real need.
 
 ---
 
@@ -151,8 +169,9 @@ bug.
 - **No placement logic on the client.** The client renders placements; it
   does not decide them. Mode C mutates via the API.
 - **Asset URLs are returned by the API**, not constructed on the client.
-  The API signs Supabase Storage upload URLs; the client never sees the
-  service role key.
+  Texture rows carry a relative `file_url` pointing at
+  `/textures/{id}/file`; the frontend prepends `VITE_API_BASE_URL` when
+  it fetches.
 - **HTTPS in dev too.** `getUserMedia` and `DeviceOrientationEvent.requestPermission`
   require a secure context. Run `make web-dev-https` (gated by
   `VITE_HTTPS=1`, uses `vite-plugin-mkcert`) — see `docs/dev/https-local.md`.
@@ -238,17 +257,18 @@ What this implies for the DB schema:
 ## Security & access
 
 - Mode C path (`/_studio/<token>`) is **obscurity, not security**. Every
-  mutating endpoint must verify a Supabase JWT server-side and check the
-  user's role.
-- Texture uploads use **Supabase Storage signed URLs**. The API (holding
-  the service role key) signs; the client PUTs directly to storage. The
-  API never proxies binary uploads.
-- **Service role key NEVER leaves the backend.** The frontend only sees
-  the anon key and user-scoped JWTs.
+  mutating endpoint must verify a locally-issued JWT server-side via the
+  `require_admin` dependency.
+- Texture uploads stream straight through `POST /textures` (multipart);
+  the API validates mime + size, writes bytes to
+  `TEXTURE_STORAGE_DIR/<id>.<ext>`, and inserts the row only after the
+  file lands on disk.
+- **`JWT_SECRET` and `ADMIN_PASSWORD_HASH` NEVER leave the backend.**
+  Frontend only ever sees the issued JWT after a successful login.
 - Never commit `.env` files. Every app has `.env.example` documenting
   required keys.
-- User-uploaded images must be validated (mime sniff + size cap) before the
-  upload URL is signed.
+- User-uploaded images are validated (mime allow-list + size cap)
+  inside `TextureService.create` before any disk write.
 
 ---
 
