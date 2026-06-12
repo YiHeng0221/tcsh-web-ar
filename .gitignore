@@ -18,6 +18,7 @@ node_modules/
 dist/
 .turbo/
 bun.lockb
+*.tsbuildinfo
 *.log
 
 # ─── editors / os ────────────────────────
