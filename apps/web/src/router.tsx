@@ -26,6 +26,12 @@ const ARView = lazy(() => import("@/modes/a/screens/ARView"));
 // field testers compare expected vs AR layout on the same device.
 const DevMockPlacements = lazy(() => import("@/pages/DevMockPlacements"));
 
+// Dev-only spike for 8th Wall SLAM walking-AR. Lazy + a runtime-injected
+// engine <script> (see lib/slam/load-xr8.ts) keep the ~1 MB SLAM binary out
+// of every other route's bundle — only a deep-link into /dev/slam-mvp pulls
+// it, and only after the user taps Start.
+const DevSlamMvp = lazy(() => import("@/pages/DevSlamMvp"));
+
 /** Lightweight DOM-only fallback while the lazy chunk downloads. */
 function LazyChunkLoading() {
   return (
@@ -81,6 +87,16 @@ export const router = createBrowserRouter([
     element: (
       <Suspense fallback={<LazyChunkLoading />}>
         <DevMockPlacements />
+      </Suspense>
+    ),
+  },
+
+  // Dev spike: 8th Wall SLAM walking-AR MVP (see component docstring).
+  {
+    path: "/dev/slam-mvp",
+    element: (
+      <Suspense fallback={<LazyChunkLoading />}>
+        <DevSlamMvp />
       </Suspense>
     ),
   },
