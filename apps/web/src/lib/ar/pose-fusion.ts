@@ -67,6 +67,12 @@ export class PoseFusion {
   private reprojHistory: number[] = [];
   private consecutiveOutliers = 0;
 
+  /** Whether any IMU reading has arrived (field HUD: a dead sensor stream
+   *  freezes coasting rotation — see 2026-06-13 iOS re-grant quirk). */
+  get hasImu(): boolean {
+    return this.haveImu;
+  }
+
   /** Feed the current IMU orientation (call from the IMU subscription). */
   setImu(q: Quaternion): void {
     this.imuNow.copy(q);

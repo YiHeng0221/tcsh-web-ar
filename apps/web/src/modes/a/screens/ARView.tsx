@@ -35,6 +35,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { closeArCamera, openArCamera } from "@/lib/ar/camera";
 import {
   allGranted,
+  rearmOrientation,
   requestAllArPermissions,
 } from "@/lib/ar/permissions";
 import { PnpWorkerClient } from "@/lib/ar/pnp-client";
@@ -316,9 +317,18 @@ export default function ARView() {
       } catch {
         return; // no standing grant — stay on the permission gate
       }
+      // iOS re-grant quirk: with a standing grant this resolves silently,
+      // but WITHOUT this call deviceorientation never fires this page
+      // load → coasting rotation freezes (field bug 2026-06-13). If iOS
+      // insists on a gesture, fall back to the permission gate.
+      const imuOk = await rearmOrientation();
       if (cancelled || !mountedRef.current) {
         closeArCamera(probe);
         return;
+      }
+      if (!imuOk) {
+        closeArCamera(probe);
+        return; // stay on the gate; the tap path re-asks both permissions
       }
       await attachPipeline(probe);
     })();
@@ -463,6 +473,7 @@ export default function ARView() {
               placements={placements}
               videoWidth={effectiveVideoSize.w}
               videoHeight={effectiveVideoSize.h}
+              debug={debugEnabled}
             />
           </Canvas>
         </div>
@@ -544,6 +555,10 @@ export default function ARView() {
               {diag.lastReprojPx != null ? diag.lastReprojPx.toFixed(1) : "—"}px
               lastQR={diag.lastStation ?? "—"}
             </div>
+            <FusionHudLine
+              fusion={fusionRef.current}
+              placementCount={placements.length}
+            />
           </div>
         </div>
       )}
@@ -555,5 +570,33 @@ export default function ARView() {
         }
       `}</style>
     </main>
+  );
+}
+
+/**
+ * One-line fusion/camera snapshot for the field HUD — re-renders on its
+ * own 2Hz timer so the hot path stays untouched.
+ */
+function FusionHudLine({
+  fusion,
+  placementCount,
+}: {
+  fusion: import("@/lib/ar/pose-fusion").PoseFusion;
+  placementCount: number;
+}) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => force((n) => n + 1), 500);
+    return () => window.clearInterval(id);
+  }, []);
+  const pose = fusion.getPose();
+  const p = pose.position;
+  return (
+    <div>
+      fusion={pose.state} imu={fusion.hasImu ? "Y" : "N!"} recal=
+      {pose.needsRecalibration ? "Y" : "n"}{" "}
+      cam=({p.x.toFixed(2)},{p.y.toFixed(2)},{p.z.toFixed(2)}) quads=
+      {placementCount}
+    </div>
   );
 }

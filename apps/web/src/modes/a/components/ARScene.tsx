@@ -108,6 +108,8 @@ export type ARSceneProps = {
   placements: RenderPlacement[];
   videoWidth: number;
   videoHeight: number;
+  /** Render anchor-frame axes/grid + wireframe quad outlines (field HUD). */
+  debug?: boolean;
 };
 
 /**
@@ -161,6 +163,7 @@ function ARSceneInner({
   placements,
   videoWidth,
   videoHeight,
+  debug = false,
 }: ARSceneProps) {
   const groupRef = useRef<Group>(null);
   const invalidate = useThree((s) => s.invalidate);
@@ -196,8 +199,20 @@ function ARSceneInner({
           placement={p}
           geometry={geometry}
           cache={cache}
+          debug={debug}
         />
       ))}
+      {debug && (
+        <>
+          {/* Anchor-frame visualisation: RGB axes at the QR origin
+              (x=red, y=green up, z=blue) + a 4m ground grid. If these
+              don't appear where the physical QR lies, the pose chain is
+              wrong; if they do but quads don't, the quads are simply
+              outside the current view direction. */}
+          <axesHelper args={[0.5]} />
+          <gridHelper args={[4, 8, 0x00ffcc, 0x224444]} />
+        </>
+      )}
     </group>
   );
 }
@@ -211,10 +226,12 @@ function PlacementQuad({
   placement,
   geometry,
   cache,
+  debug = false,
 }: {
   placement: RenderPlacement;
   geometry: PlaneGeometry;
   cache: TextureCache;
+  debug?: boolean;
 }) {
   const material = useMemo(
     () =>
@@ -240,13 +257,21 @@ function PlacementQuad({
   material.needsUpdate = true;
 
   return (
-    <mesh
-      geometry={geometry}
-      material={material}
+    <group
       position={placement.position}
       quaternion={placement.rotation}
       scale={placement.scale}
-    />
+    >
+      <mesh geometry={geometry} material={material} />
+      {debug && (
+        // Magenta outline renders even while the texture is loading (or
+        // failing) — separates "quad is outside the view" from "texture
+        // never arrived" in one glance.
+        <mesh geometry={geometry}>
+          <meshBasicMaterial color={0xff00ff} wireframe toneMapped={false} />
+        </mesh>
+      )}
+    </group>
   );
 }
 
