@@ -58,7 +58,10 @@ async def get_texture_file(
     if not path.exists():
         # Row points at a missing file — surface as 404 rather than a 500
         # leaking the disk path. Catalog should self-heal on next upload.
-        raise HTTPException(status_code=404, detail="texture file missing on disk")
+        # Deliberately the same message as a missing row — the client
+        # doesn't need to know whether the DB row or the disk file was
+        # the missing half (that distinction is logged server-side).
+        raise HTTPException(status_code=404, detail="texture not found")
     return FileResponse(
         path=path,
         media_type=texture.mime_type,

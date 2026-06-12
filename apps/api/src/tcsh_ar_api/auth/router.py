@@ -2,16 +2,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from tcsh_ar_api.auth.dependencies import get_current_admin
+from tcsh_ar_api.auth.dependencies import BEARER_CHALLENGE, get_current_admin
 from tcsh_ar_api.auth.exceptions import InvalidCredentialsError
 from tcsh_ar_api.auth.schemas import LocalUser, LoginRequest, MeResponse, TokenResponse
 from tcsh_ar_api.auth.service import mint_token, verify_password
 from tcsh_ar_api.config import Settings, get_settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-_BEARER_CHALLENGE = {"WWW-Authenticate": "Bearer"}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -34,7 +31,7 @@ async def login(
         raise HTTPException(
             status_code=InvalidCredentialsError.status_code,
             detail=InvalidCredentialsError.detail,
-            headers=_BEARER_CHALLENGE,
+            headers=BEARER_CHALLENGE,
         )
 
     token = mint_token(settings.admin_email, settings=settings)

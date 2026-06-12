@@ -38,6 +38,11 @@ from tcsh_ar_api.textures.models import Texture
 
 logger = logging.getLogger(__name__)
 
+# KTX2 identifier per the Khronos spec §3.1 — the 12-byte file signature
+# `«KTX 20»\r\n\x1a\n`. `filetype` (v1.x) can't detect ktx2, so uploads
+# declaring image/ktx2 are checked against this manually in _validate.
+_KTX2_MAGIC = b"\xabKTX 20\xbb\r\n\x1a\n"
+
 
 class TextureService:
     def __init__(self, session: AsyncSession, settings: Settings) -> None:
@@ -77,10 +82,17 @@ class TextureService:
         #
         # image/ktx2 is a KhronosGroup format with the magic bytes
         # `«KTX 20»\r\n\x1a\n`. The `filetype` library does not recognise it
-        # (v1.x), so we fall back to allow-listing it by the declared mime
-        # type and rely on the MIME allow-list as the sole gate for ktx2.
+        # (v1.x), so we verify the KTX2 signature manually — otherwise a
+        # client could upload arbitrary bytes under a declared image/ktx2
+        # mime and bypass content validation entirely.
         # All other allowed mimes (jpeg, png, webp) are covered by filetype.
-        if mime_type.lower() != "image/ktx2":
+        if mime_type.lower() == "image/ktx2":
+            if not data.startswith(_KTX2_MAGIC):
+                raise InvalidMimeError(
+                    "file content is not a valid KTX2 texture "
+                    "(KTX 20 signature missing)"
+                )
+        else:
             detected = filetype.guess_mime(data)
             if detected is None:
                 raise InvalidMimeError(
@@ -128,7 +140,13 @@ class TextureService:
 
         texture_id = uuid.uuid4()
         path = self._file_path(texture_id, filename)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        # Same StorageError contract as the write below — a mkdir failure
+        # (read-only volume, permission) should surface as a storage
+        # problem, not an unhandled 500.
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise StorageError() from exc
 
         texture = Texture(
             id=texture_id,

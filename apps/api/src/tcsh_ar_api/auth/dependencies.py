@@ -13,7 +13,7 @@ _bearer = HTTPBearer(auto_error=False)
 # RFC 6750 §3 — a 401 rejecting a bearer token must advertise the scheme
 # so clients (and the generated OpenAPI clients downstream) can parse the
 # challenge instead of guessing.
-_BEARER_CHALLENGE = {"WWW-Authenticate": "Bearer"}
+BEARER_CHALLENGE = {"WWW-Authenticate": "Bearer"}
 
 
 async def get_current_admin(
@@ -30,7 +30,7 @@ async def get_current_admin(
         raise HTTPException(
             status_code=401,
             detail="missing bearer token",
-            headers=_BEARER_CHALLENGE,
+            headers=BEARER_CHALLENGE,
         )
     try:
         return verify_token(creds.credentials, settings=settings)
@@ -38,7 +38,7 @@ async def get_current_admin(
         raise HTTPException(
             status_code=401,
             detail=exc.detail,
-            headers=_BEARER_CHALLENGE,
+            headers=BEARER_CHALLENGE,
         ) from exc
 
 
