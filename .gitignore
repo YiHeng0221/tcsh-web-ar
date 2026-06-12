@@ -33,3 +33,9 @@ bun.lockb
 # ─── project ─────────────────────────────
 apps/web/dist
 apps/api/.coverage
+
+# ─── claude code ─────────────────────────
+# Per-agent worktree backups created by Claude Code workflows. Local-only
+# scratch; never commit. `.claude/agents/`, `.claude/commands/`, and
+# settings ARE committed — they're the team-shared harness.
+.claude/worktrees/

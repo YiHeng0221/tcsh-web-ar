@@ -1,0 +1,209 @@
+name: ci
+
+# CI for tcsh-web-ar.
+#
+# The workflow name MUST stay "ci" — review.yml's `workflow_run` trigger
+# references it by name. Renaming this breaks the AI review chain.
+#
+# Jobs:
+#   size-guard    — PR only: reject PRs > 800 LoC (excluding generated)
+#   secret-scan   — always: gitleaks detect
+#   api           — always: ruff + mypy + pytest (apps/api)
+#   web           — always: tsc + build (apps/web)
+#   label         — PR only, needs all above: tag `ai-review` so review.yml fires
+#
+# Out of scope (deliberately deferred — see #33 / #34):
+#   - Deploy steps and any secret-dependent integrations.
+#   - ESLint + openapi-types-check: pre-existing repo state issues. Track
+#     and land in a follow-up PR once the underlying state is fixed.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+# Cancel in-progress runs of the same workflow on the same ref. PRs typically
+# get force-pushed during review; the older run becomes irrelevant.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── PR size guard ───────────────────────────────────────────────────────
+  size-guard:
+    name: PR size guard (≤ 800 LoC)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR diff size (excluding auto-generated files)
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # 排除 lockfile / 自動產生 types / snapshot — 這些檔的 line count
+          # 跟人類審 review 的 effort 不成比例。
+          total=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json files --jq '
+            [.files[]
+              | select(.path | endswith("bun.lock") | not)
+              | select(.path | endswith("uv.lock") | not)
+              | select(.path | endswith("pnpm-lock.yaml") | not)
+              | select(.path | endswith("package-lock.json") | not)
+              | select(.path | endswith(".snap") | not)
+              | select(.path | endswith("api.gen.ts") | not)
+              | .additions + .deletions
+            ] | add // 0')
+          raw=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json additions,deletions \
+            --jq '.additions + .deletions')
+          echo "PR size (excluding generated): ${total} LoC"
+          echo "Raw additions + deletions (incl. generated): ${raw} LoC"
+          if [ "$total" -gt 800 ]; then
+            echo "::error::PR exceeds 800 LoC limit (${total} lines, excluding generated). Split it."
+            exit 1
+          fi
+          echo "✅ PR size: ${total} LoC ≤ 800"
+
+  # ─── Secret scan ─────────────────────────────────────────────────────────
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          GITLEAKS_VERSION="8.21.2"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+
+      - name: Scan for secrets
+        run: gitleaks detect --source . --redact --exit-code 1
+
+  # ─── apps/api: ruff + mypy + pytest ──────────────────────────────────────
+  api:
+    name: api (ruff + mypy + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        # Pin to a specific tagged release; uv ships breaking changes on
+        # minor bumps occasionally and we want CI to be deterministic.
+        # Tag pin (not SHA pin) is a deliberate trade-off: no deploy steps
+        # or secrets in this workflow → supply chain blast radius is low.
+        # Re-evaluate when a deploy job or secret-dependent step lands.
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.22"
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+
+      - name: Set up Python
+        # `requires-python = ">=3.12,<3.13"` in pyproject.toml — pin to the
+        # same minor here so CI matches what developers run locally.
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff (lint)
+        run: uv run ruff check src tests
+
+      - name: Mypy (typecheck)
+        run: uv run mypy
+
+      - name: Pytest
+        # Tests in apps/api/tests/auth do not touch the network or DB
+        # (every external call is monkeypatched). No Postgres service
+        # required at present. Revisit when integration tests land.
+        run: uv run pytest
+
+  # ─── apps/web: tsc + build ───────────────────────────────────────────────
+  web:
+    name: web (tsc + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        # Tag pin (not SHA pin) — same trade-off as setup-uv above.
+        uses: oven-sh/setup-bun@v2
+        with:
+          # No `packageManager` field in apps/web/package.json yet — pin
+          # explicitly so CI is reproducible. Matches local dev (1.2.x).
+          bun-version: "1.2.15"
+
+      - name: Cache Bun install store
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('apps/web/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck (tsc --noEmit)
+        run: bun run typecheck
+
+      - name: Build (tsc -b && vite build)
+        # `build` re-runs tsc in project-references mode and then bundles.
+        # It catches issues `typecheck` misses (composite project graph,
+        # asset resolution) and produces the artifact deploy will ship.
+        run: bun run build
+
+  # ─── Tag PR for AI review ────────────────────────────────────────────────
+  label:
+    name: Tag PR for AI review
+    if: github.event_name == 'pull_request'
+    needs: [size-guard, secret-scan, api, web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip drafts
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          IS_DRAFT=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json isDraft --jq '.isDraft')
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "::notice::PR #$PR_NUMBER is a draft — skipping ai-review label"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Add ai-review label
+        if: steps.draft.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # gh pr edit --add-label silently fails on some repos (Projects-classic
+          # GraphQL deprecation). Use REST API directly.
+          set +e
+          echo '{"labels":["ai-review"]}' | gh api -X POST "repos/${REPO}/issues/${PR_NUMBER}/labels" --input - >/dev/null 2>&1
+          echo "::notice::PR #$PR_NUMBER tagged ai-review. review.yml will chain off this run's completion."
+          exit 0
