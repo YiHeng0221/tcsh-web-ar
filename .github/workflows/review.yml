@@ -123,6 +123,15 @@ jobs:
           ref: ${{ steps.prinfo.outputs.sha }}
           fetch-depth: 0
 
+      - name: Overlay harness files from main
+        # Two reasons: (1) PR branches cut before the harness landed don't
+        # contain REVIEW.md / ai-review.sh at all; (2) never let a PR tamper
+        # with the review rubric or the script that runs with secrets —
+        # always take both from main.
+        run: |
+          git fetch origin main --depth 1
+          git checkout FETCH_HEAD -- REVIEW.md .github/scripts/ai-review.sh
+
       - name: Setup Node (for claude CLI install)
         uses: actions/setup-node@v4
         with:
