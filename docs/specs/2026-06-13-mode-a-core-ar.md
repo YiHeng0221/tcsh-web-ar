@@ -14,25 +14,31 @@
 （world-locked）方式渲染該站可見的 placements；QR 不在畫面時用 IMU 維持
 旋轉追蹤。精度目標：使用者站定時 **公分級**。
 
-## 0.5 全程使用流程（2026-06-13 使用者拍板）
+## 0.5 全程使用流程（2026-06-13 使用者拍板，二次修訂）
 
 ```
-手機原生相機掃地面 QR（QR = URL）
-  → 開啟網頁，深連結帶 station_id（此時**還沒有 pose**——原生掃描
-    拿不到 corner pixel，定位必須等 app 內相機）
-  → 選擇 mode（landing 保留站點 context）
-  → 選 Mode A → 權限（A1）→ 直接進 A3：app 內相機對準**同一張 QR**
-    → solvePnP → A4 AR 觀看
-  → 定位跑掉 / 走到別站 → 對準附近任一張 QR → A4 的低頻連續掃描
-    自動 re-snap（不同站的 QR = 切換錨點，placements 換站重取）
+作品前方地面 QR（QR = URL）── 手機原生相機掃
+  → 深連結「直接」進 Mode A 的 AR 畫面（不經 landing / 不選 mode）
+  → 首次造訪：一顆「開始 AR」大按鈕（iOS 規定相機 + motion 權限必須
+    由使用者手勢觸發——這一次點擊不可省，也只需要這一次）
+  → 相機畫面開啟，取景框提示「對準地面的 QR」
+  → 對準同一張 QR ~1 秒 → solvePnP 鎖定 → AR 貼圖淡入（同畫面狀態
+    轉換，不換頁）
+  → 畫面右上角：mode 切換 switch（A ↔ B；C 不在公開 UI）
+  → 定位跑掉 → 取景提示重現 → 對準附近任一張 QR 自動 re-snap
+    （不同站 QR = 換錨，placements 換站重取）
 ```
 
 設計後果：
+- **A3 與 A4 合併成單一 `ARView` 畫面**，內部狀態機：
+  `permission-gate → scanning → viewing → coasting(→ rescan prompt)`。
+  不是兩條路由——掃描框與 AR 內容在同一個相機 surface 上切換。
+- 路由：`/a/scan/{station_id}` 與 `/a/view/{station_id}` 都導到 ARView
+  （保留兩個 path 是為了已印出的 QR 與舊連結不失效）。
 - **A2 站點選擇器退出主流程**（站點由掃到的 QR 決定），保留作為
   「沒掃 QR 直接進網站」的 fallback。
-- 深連結路由：`/a/scan/{station_id}` 就是 QR 的 URL target——權限未授予
-  時 A3 要先導 A1 再彈回來（保留 station param）。
-- A4 的連續掃描接受**任何**站的 QR（不只當前站）——換站即換錨。
+- ARView 的連續掃描接受**任何**站的 QR（不只當前站）——換站即換錨。
+- 右上 mode switch：A↔B 切換（B = 3D viewer）。切到 B 要釋放相機。
 
 ## 1. Scope / Non-goals
 
