@@ -60,6 +60,15 @@ PR_HEAD=$(jq -r .headRefName "$PR_JSON")
 DIFF_FILE="$WORK_DIR/diff.patch"
 gh pr diff "$PR_NUMBER" > "$DIFF_FILE"
 
+# ─── Fetch recent PR discussion ────────────────────────────────────────────
+# Re-review rounds must see the author's responses — without these, a
+# refuted false positive gets re-reported verbatim every round (the
+# reviewer is stateless across rounds otherwise).
+COMMENTS_FILE="$WORK_DIR/comments.md"
+gh pr view "$PR_NUMBER" --json comments \
+  --jq '.comments[-6:][] | "### \(.author.login) @ \(.createdAt)\n\(.body)\n"' \
+  > "$COMMENTS_FILE" 2>/dev/null || : > "$COMMENTS_FILE"
+
 if [ ! -s "$DIFF_FILE" ]; then
   echo "✗ Empty diff — nothing to review" >&2
   exit 1
@@ -110,6 +119,23 @@ PROMPT_FILE="$WORK_DIR/prompt.md"
   echo ""
   echo "${PR_BODY}"
   echo ""
+  if [ -s "$COMMENTS_FILE" ]; then
+    echo "## 既有 PR 討論（最近 6 則——含前輪 review 與作者回覆）"
+    echo ""
+    echo "前輪被作者以 file:line 證據駁回的 finding，除非你用工具重新驗證後"
+    echo "確認駁回有誤，否則**不要重複報告**。"
+    echo ""
+    cat "$COMMENTS_FILE"
+    echo ""
+  fi
+  echo "---"
+  echo ""
+  echo "# 重要：你在完整 repo checkout 內執行"
+  echo ""
+  echo "diff 的 context 行數有限。要宣稱「某欄位/符號/檔案不存在」之前，"
+  echo "**必須**用 Read/Grep 工具開完整檔案驗證——只憑 diff 推斷存在性是"
+  echo "本 harness 已知的誤判來源（見 REVIEW.md Verification bar）。"
+  echo ""
   echo "---"
   echo ""
   echo "# Diff to review"
@@ -136,9 +162,12 @@ echo "Prompt size: $(wc -c < "$PROMPT_FILE") bytes"
 # ~300KB prompt) blows past ARG_MAX and fails with "Argument list too
 # long" (exit 126) if passed as an argument.
 REVIEW_OUTPUT="$WORK_DIR/review.md"
+# Read-only tools so the reviewer can verify "X doesn't exist" claims
+# against the full checkout instead of hallucinating from diff context.
 claude -p \
   --model "$CLAUDE_MODEL" \
   --output-format text \
+  --allowed-tools "Read,Grep,Glob" \
   < "$PROMPT_FILE" \
   > "$REVIEW_OUTPUT"
 

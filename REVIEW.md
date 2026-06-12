@@ -116,6 +116,13 @@ Before posting a finding, verify it's grounded:
 - Security claims must name the attack vector — "this could be exploited" is
   not enough; "user-supplied `x` reaches `eval` at line N" is.
 - If you can't verify in the diff, mark it as a question, not a 🔴.
+- **Existence claims need full-file proof.** "Field/symbol/file X doesn't
+  exist" must be verified by opening the actual file (Read/Grep on the
+  checkout) — diff context truncation has produced false 🔴s here before.
+  A claim that 98 passing tests contradict is almost certainly wrong.
+- **Don't contradict the previous round.** If round N-1 asked for a change
+  and the author made it, don't ask to revert it in round N unless you can
+  cite a concrete defect the change introduced.
 
 ---
 
