@@ -1,48 +1,46 @@
 /**
- * ARViewWithFallback — picks the Mode A AR path at runtime (spec §0, §4).
+ * ARViewWithFallback — gates Mode A behind the SLAM engine probe (spec §0).
  *
- * SLAM is the main line: `ARViewSlam` (8th Wall walking-AR). But the engine
- * binary is a runtime-injected `<script>` from a CDN, and some older devices /
- * blocked CDNs can't load it. Rather than dead-end those visitors, we probe
- * `loadXR8()` once up front:
- *
- *   - resolves → render `ARViewSlam` (the full SLAM experience).
- *   - rejects  → fall back to the legacy QR + IMU `ARView`, with a discreet
- *     「精簡模式」 badge so the visitor knows they're on the lighter path.
+ * SLAM is the ONLY line (user decision 2026-06-13 05:29: no IMU fallback —
+ * one tracking behaviour everywhere, simpler to reason about in the field).
+ * The engine binary is a runtime-injected `<script>` from a CDN; if a device
+ * or network can't load it we show an honest "unsupported" prompt instead of
+ * silently degrading to a different tracking model.
  *
  * The probe is cheap on success (the script is cached and the same promise is
  * reused by `ARViewSlam`'s own `loadXR8()` call — `load-xr8.ts` memoises it),
- * and on failure it surfaces quickly via the script's `onerror`. Keeping the
- * decision here (not in the router) means the router stays a single lazy
- * import and the fallback UX lives next to the screens it chooses between.
+ * and on failure it surfaces quickly via the script's `onerror`.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { loadXR8 } from "@/lib/slam/load-xr8";
 
-import ARView from "./ARView";
 import ARViewSlam from "./ARViewSlam";
 
-type Decision = "probing" | "slam" | "fallback";
+type Decision = "probing" | "slam" | "unsupported";
 
 export default function ARViewWithFallback() {
   const [decision, setDecision] = useState<Decision>("probing");
 
-  useEffect(() => {
+  const probe = useCallback(() => {
+    setDecision("probing");
     let cancelled = false;
     loadXR8().then(
       () => {
         if (!cancelled) setDecision("slam");
       },
       () => {
-        if (!cancelled) setDecision("fallback");
+        if (!cancelled) setDecision("unsupported");
       },
     );
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => probe(), [probe]);
 
   if (decision === "probing") {
     return (
@@ -52,18 +50,30 @@ export default function ARViewWithFallback() {
     );
   }
 
-  if (decision === "fallback") {
+  if (decision === "unsupported") {
     return (
-      <div className="relative h-dvh w-screen">
-        <ARView />
-        {/* The badge sits over the legacy screen's own overlay; it's purely
-            informational and never intercepts touch. */}
-        <div className="safe-area pointer-events-none absolute inset-x-0 bottom-0 z-[10001] flex justify-center px-4 pb-4">
-          <span className="rounded-full bg-amber-500/85 px-3 py-1 text-xs font-medium text-black">
-            精簡模式
-          </span>
+      <main className="safe-area flex h-dvh w-screen flex-col items-center justify-center gap-6 bg-black px-8 text-center text-white">
+        <h1 className="text-xl font-medium">這台裝置暫時無法使用 AR</h1>
+        <p className="max-w-xs text-sm text-white/70">
+          AR 引擎載入失敗——可能是裝置過舊、瀏覽器不支援，或目前的網路擋住了
+          引擎下載。你仍然可以用 3D 模式欣賞完整作品。
+        </p>
+        <div className="flex flex-col items-center gap-3">
+          <Link
+            to="/b"
+            className="rounded-xl bg-accent px-8 py-3 text-base font-semibold text-black"
+          >
+            改用 3D 模式
+          </Link>
+          <button
+            type="button"
+            onClick={probe}
+            className="text-sm text-white/60 underline-offset-4 hover:underline"
+          >
+            重試 AR
+          </button>
         </div>
-      </div>
+      </main>
     );
   }
 
