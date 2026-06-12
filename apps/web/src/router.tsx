@@ -15,6 +15,13 @@ import NotFound from "@/pages/NotFound";
 // for no reason.
 const B2Viewer = lazy(() => import("@/modes/b/screens/B2Viewer"));
 
+// Dev-only sandbox for eyeballing the Mode A mock placements without a
+// camera. Lazy for the same three.js-bundle reason as B2. Dev-only by
+// convention (not env-gated): it ships nothing beyond the shared 3D
+// chunk and six small demo textures, and having it in prod builds lets
+// field testers compare expected vs AR layout on the same device.
+const DevMockPlacements = lazy(() => import("@/pages/DevMockPlacements"));
+
 /** Lightweight DOM-only fallback while the lazy chunk downloads. */
 function LazyChunkLoading() {
   return (
@@ -43,6 +50,16 @@ export const router = createBrowserRouter([
     element: (
       <Suspense fallback={<LazyChunkLoading />}>
         <B2Viewer />
+      </Suspense>
+    ),
+  },
+
+  // Dev sandbox: mock placement layout viewer (see component docstring).
+  {
+    path: "/dev/mock-placements",
+    element: (
+      <Suspense fallback={<LazyChunkLoading />}>
+        <DevMockPlacements />
       </Suspense>
     ),
   },
