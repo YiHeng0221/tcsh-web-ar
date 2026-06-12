@@ -37,14 +37,13 @@ import {
   allGranted,
   requestAllArPermissions,
 } from "@/lib/ar/permissions";
-import { loadOpenCv, type Cv } from "@/lib/ar/opencv-loader";
+import { PnpWorkerClient } from "@/lib/ar/pnp-client";
 import {
   QrDetector,
   type QrDetection,
 } from "@/lib/ar/qr-detector";
 import { ImuTracker } from "@/lib/ar/imu";
 import { PoseFusion } from "@/lib/ar/pose-fusion";
-import { solveQrPose } from "@/lib/ar/solve-pnp";
 import { MOCK_QR_SIZE_MM } from "@/lib/ar/mock-placements";
 
 import ARScene from "../components/ARScene";
@@ -103,9 +102,14 @@ export default function ARView() {
   const [stationId, setStationId] = useState<string | undefined>(
     params.stationId,
   );
-  // Field-debug HUD, opt-in via ?debug=1 (kept across the session).
+  // Field-debug HUD. Always on under the dev server (the printed QR's
+  // URL has no query param, and asking testers to retype ?debug=1 after
+  // every rescan proved error-prone in the field). Prod builds require
+  // the explicit ?debug=1 opt-in.
   const debugEnabled = useMemo(
-    () => new URLSearchParams(location.search).get("debug") === "1",
+    () =>
+      import.meta.env.DEV ||
+      new URLSearchParams(location.search).get("debug") === "1",
     [location.search],
   );
   const diagRef = useRef<DiagCounters>(freshDiag());
@@ -130,7 +134,7 @@ export default function ARView() {
   const streamRef = useRef<MediaStream | null>(null);
   const detectorRef = useRef<QrDetector | null>(null);
   const imuRef = useRef<ImuTracker | null>(null);
-  const cvRef = useRef<Cv | null>(null);
+  const pnpRef = useRef<PnpWorkerClient | null>(null);
   const fusionRef = useRef<PoseFusion>(new PoseFusion());
   const mountedRef = useRef(true);
   // Latest-known phase / station for callbacks that outlive a render.
@@ -152,16 +156,17 @@ export default function ARView() {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    // We intentionally do NOT reset the memoised OpenCV promise — the WASM
-    // module is process-global and reused if the user re-enters Mode A.
-    cvRef.current = null;
+    // Terminating the worker frees the OpenCV WASM heap with it. Re-entry
+    // pays the compile again — but in a worker, so the UI never notices.
+    pnpRef.current?.dispose();
+    pnpRef.current = null;
   }, []);
 
   // ── A QR detection (shared by scanning + viewing recalibration loops) ─────
   const handleDetection = useCallback(
     (detection: QrDetection) => {
       if (!mountedRef.current) return;
-      const cv = cvRef.current;
+      const pnp = pnpRef.current;
       const video = videoRef.current;
       const diag = diagRef.current;
       diag.decodes += 1;
@@ -169,11 +174,14 @@ export default function ARView() {
         diag.foreign += 1;
         return;
       }
-      if (!detection.corners) {
+      const corners = detection.corners;
+      if (!corners) {
         diag.noCorners += 1;
         return;
       }
-      if (!cv) {
+      if (!pnp || pnp.state !== "ready") {
+        // Worker still compiling OpenCV (or failed) — don't queue a flood
+        // of stale solves; the next detection after ready will land.
         diag.cvNotReady += 1;
         return;
       }
@@ -185,37 +193,43 @@ export default function ARView() {
       const h = video.videoHeight;
       if (w === 0 || h === 0) return;
 
-      const pose = solveQrPose(cv, detection.corners, QR_SIZE_MM, w, h);
-      if (!pose) {
-        diag.solveRejected += 1;
-        return; // reproj gate failed — don't snap a bad solve
-      }
-      diag.solveOk += 1;
-      diag.lastReprojPx = pose.reprojErrorPx;
-
-      // A different station's QR entered frame → re-anchor to it (spec §0.5:
-      // "不同站 QR = 換錨, placements 換站重取"). Reset fusion so we don't
-      // blend two anchors' poses.
-      if (detectedStation !== stationIdRef.current) {
-        fusionRef.current = new PoseFusion();
-        setStationId(detectedStation);
-        // Keep the URL honest so a refresh / share lands on the same anchor.
-        navigate(`/a/view/${detectedStation}`, { replace: true });
-      }
-
-      fusionRef.current.pushQrPose(pose);
-
-      // First good lock in scanning → transition to viewing.
-      if (phaseRef.current === "scanning") {
-        setReticle("locked");
-        if (typeof navigator !== "undefined" && navigator.vibrate) {
-          navigator.vibrate(50);
+      // Solve happens in the worker; the pose lands asynchronously. The
+      // applier re-checks liveness — the phase may have changed (or the
+      // screen unmounted) during the round-trip.
+      void (async () => {
+        const pose = await pnp.solve(corners, QR_SIZE_MM, w, h);
+        if (!mountedRef.current) return;
+        if (!pose) {
+          diag.solveRejected += 1;
+          return; // reproj gate failed — don't snap a bad solve
         }
-        // Brief beat on the green reticle before the AR content fades in.
-        window.setTimeout(() => {
-          if (mountedRef.current) setPhase("viewing");
-        }, 600);
-      }
+        diag.solveOk += 1;
+        diag.lastReprojPx = pose.reprojErrorPx;
+
+        // A different station's QR entered frame → re-anchor to it (spec
+        // §0.5: "不同站 QR = 換錨, placements 換站重取"). Reset fusion so
+        // we don't blend two anchors' poses.
+        if (detectedStation !== stationIdRef.current) {
+          fusionRef.current = new PoseFusion();
+          setStationId(detectedStation);
+          // Keep the URL honest so a refresh / share lands on the same anchor.
+          navigate(`/a/view/${detectedStation}`, { replace: true });
+        }
+
+        fusionRef.current.pushQrPose(pose);
+
+        // First good lock in scanning → transition to viewing.
+        if (phaseRef.current === "scanning") {
+          setReticle("locked");
+          if (typeof navigator !== "undefined" && navigator.vibrate) {
+            navigator.vibrate(50);
+          }
+          // Brief beat on the green reticle before the AR content fades in.
+          window.setTimeout(() => {
+            if (mountedRef.current) setPhase("viewing");
+          }, 600);
+        }
+      })();
     },
     [navigate],
   );
@@ -261,20 +275,20 @@ export default function ARView() {
       // OpenCV loads in parallel with the camera coming up (spec §0.5: load in
       // the background, show a preparing state). The detector starts now but
       // solves are gated on cvRef being populated inside handleDetection.
+      // OpenCV lives in a Web Worker (pnp-worker.ts) — loading its ~11 MB
+      // module on the main thread froze the entire page on iPhone Safari
+      // (field bug 2026-06-13: HUD dead at 0s, attempts=0, taps ignored).
+      // The worker compiles off-thread; the scan loop runs immediately.
       cvLoadStartRef.current = performance.now();
-      loadOpenCv()
-        .then((cv) => {
-          if (!mountedRef.current) return;
-          cvRef.current = cv;
-          setOpencvReady(true);
-        })
-        .catch((err: unknown) => {
-          // OpenCV failed to load — scanning can't produce a pose. Surface
-          // the failure (HUD + hint) instead of silently spinning forever:
-          // the field bug 2026-06-13 was exactly this state, undiagnosable.
-          if (!mountedRef.current) return;
-          setOpencvError(err instanceof Error ? err.message : String(err));
-        });
+      const pnp = new PnpWorkerClient();
+      pnp.onStateChange = (state) => {
+        if (!mountedRef.current) return;
+        if (state === "ready") setOpencvReady(true);
+        if (state === "failed") {
+          setOpencvError(pnp.error ?? "worker failed");
+        }
+      };
+      pnpRef.current = pnp;
 
       // The QR detector's lifecycle is owned by the phase effect below (it
       // sets the right throttle for scanning vs viewing); we only flip the
