@@ -14,6 +14,26 @@
 （world-locked）方式渲染該站可見的 placements；QR 不在畫面時用 IMU 維持
 旋轉追蹤。精度目標：使用者站定時 **公分級**。
 
+## 0.5 全程使用流程（2026-06-13 使用者拍板）
+
+```
+手機原生相機掃地面 QR（QR = URL）
+  → 開啟網頁，深連結帶 station_id（此時**還沒有 pose**——原生掃描
+    拿不到 corner pixel，定位必須等 app 內相機）
+  → 選擇 mode（landing 保留站點 context）
+  → 選 Mode A → 權限（A1）→ 直接進 A3：app 內相機對準**同一張 QR**
+    → solvePnP → A4 AR 觀看
+  → 定位跑掉 / 走到別站 → 對準附近任一張 QR → A4 的低頻連續掃描
+    自動 re-snap（不同站的 QR = 切換錨點，placements 換站重取）
+```
+
+設計後果：
+- **A2 站點選擇器退出主流程**（站點由掃到的 QR 決定），保留作為
+  「沒掃 QR 直接進網站」的 fallback。
+- 深連結路由：`/a/scan/{station_id}` 就是 QR 的 URL target——權限未授予
+  時 A3 要先導 A1 再彈回來（保留 station param）。
+- A4 的連續掃描接受**任何**站的 QR（不只當前站）——換站即換錨。
+
 ## 1. Scope / Non-goals
 
 **做：**
@@ -122,8 +142,13 @@ export function closeArCamera(stream: MediaStream): void  // 停所有 track
 - 包 `BrowserQRCodeReader.decodeFromVideoElement`，但用 **手動 frame loop**
   （`requestVideoFrameCallback`，fallback rAF）+ 100ms throttle，不用 zxing
   內建連續模式（無法控制頻率）。
-- QR payload 格式：`tcsh://station/{station_id}`。解析失敗（別人的 QR）→
-  回 `{ kind: "foreign" }`，UI 顯示「這不是本展的 QR」。
+- QR payload 格式（**2026-06-13 更新：URL 制，雙格式相容**）：
+  - **主格式：URL** `https://<host>/a/scan/{station_id}`——同一張 QR 兼任
+    「入口」與「錨點」：訪客用**手機原生相機**掃它開啟網頁（深連結帶站點），
+    進到 Mode A 後 app 內相機再對準同一張 QR 做 solvePnP 定位。host 不限
+    （LAN IP / 正式網域都行），只認 path pattern `/a/scan/{id}`。
+  - **相容格式：** `tcsh://station/{station_id}`（早期 demo 資產用）。
+  - 解析失敗（別人的 QR）→ 回 `{ kind: "foreign" }`，UI 顯示「這不是本展的 QR」。
 - **corner 來源**：zxing `ResultPoint[]`。注意 zxing 的 resultPoints 是
   3 個 finder pattern + 1 個 alignment pattern，**不是**四個外角。用
   finder pattern 幾何外推外角（finder 中心離角 3.5 module，QR version 由
