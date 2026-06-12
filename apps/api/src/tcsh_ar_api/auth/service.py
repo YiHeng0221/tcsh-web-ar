@@ -25,6 +25,11 @@ from tcsh_ar_api.auth.exceptions import InvalidTokenError
 from tcsh_ar_api.auth.schemas import LocalUser
 from tcsh_ar_api.config import Settings, get_settings
 
+# Pre-computed hash for the empty-config timing equalizer in
+# verify_password — generated once at import so request latency matches
+# a genuine bcrypt verification.
+_DUMMY_HASH = bcrypt.hashpw(b"never-matches", bcrypt.gensalt())
+
 # Hardcoded allow-list — never trust the `alg` declared in the token header.
 # HS256 is fine for a single-process deployment with one admin; if we ever
 # deploy multiple workers or want key rotation, swap to RS256 + a key file.
@@ -51,6 +56,10 @@ def verify_password(password: str, password_hash: str) -> bool:
     """Constant-time bcrypt verification. Returns False on any error so a
     malformed stored hash surfaces as 401, not 500."""
     if not password_hash:
+        # Misconfigured ADMIN_PASSWORD_HASH (empty) — still burn a bcrypt
+        # verification so this failure mode is timing-indistinguishable
+        # from a normal wrong-password rejection.
+        bcrypt.checkpw(b"timing-equalizer", _DUMMY_HASH)
         return False
     try:
         return bcrypt.checkpw(_coerce_secret(password), password_hash.encode("utf-8"))

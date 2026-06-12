@@ -171,6 +171,12 @@ class TextureService:
         except OSError as exc:
             logger.exception("failed to write texture file", extra={"path": str(path)})
             await self.session.rollback()
+            # If write_bytes succeeded but os.replace failed, don't leave an
+            # orphan .tmp behind — best-effort, the StorageError is the story.
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             raise StorageError() from exc
 
         try:
