@@ -43,14 +43,48 @@ export type StationPayload =
   | { kind: "station"; stationId: string }
   | { kind: "foreign" };
 
-/** Parse the QR text. Our codes are `tcsh://station/{station_id}`; anything
- *  else is someone else's QR. */
+/**
+ * Parse the QR text into a station payload (spec §6, 2026-06-13 dual-format).
+ *
+ * Two accepted shapes:
+ *   - **URL (primary):** `https://<host>/a/scan/{station_id}` — the same QR a
+ *     visitor scans with the phone's native camera to deep-link into Mode A
+ *     doubles as the solvePnP anchor. Host is not constrained (LAN IP or the
+ *     production domain both work); only the `/a/scan/{id}` path matters. A
+ *     trailing slash and query/hash are tolerated.
+ *   - **Compatibility:** `tcsh://station/{station_id}` — early demo assets.
+ *
+ * Anything else is someone else's QR → `{ kind: "foreign" }`.
+ */
 export function parseStationPayload(text: string): StationPayload {
-  const match = /^tcsh:\/\/station\/(.+)$/.exec(text.trim());
-  if (!match) return { kind: "foreign" };
-  const stationId = match[1].trim();
-  if (stationId.length === 0) return { kind: "foreign" };
-  return { kind: "station", stationId };
+  const trimmed = text.trim();
+
+  // Compatibility scheme first (cheap, unambiguous).
+  const legacy = /^tcsh:\/\/station\/(.+)$/.exec(trimmed);
+  if (legacy) {
+    const stationId = legacy[1].trim();
+    if (stationId.length > 0) return { kind: "station", stationId };
+    return { kind: "foreign" };
+  }
+
+  // URL form: match the `/a/scan/{id}` path on any http(s) host. We parse via
+  // the URL constructor so query strings / hashes don't leak into the id.
+  if (/^https?:\/\//i.test(trimmed)) {
+    let pathname: string;
+    try {
+      pathname = new URL(trimmed).pathname;
+    } catch {
+      return { kind: "foreign" };
+    }
+    const urlMatch = /^\/a\/scan\/([^/]+)\/?$/.exec(pathname);
+    if (urlMatch) {
+      const stationId = decodeURIComponent(urlMatch[1]).trim();
+      if (stationId.length > 0) return { kind: "station", stationId };
+    }
+    return { kind: "foreign" };
+  }
+
+  return { kind: "foreign" };
 }
 
 /**

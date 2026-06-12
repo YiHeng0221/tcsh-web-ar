@@ -3,8 +3,6 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import A1Permission from "@/modes/a/screens/A1Permission";
 import A2StationPicker from "@/modes/a/screens/A2StationPicker";
-import A3QRScan from "@/modes/a/screens/A3QRScan";
-import A4ARViewing from "@/modes/a/screens/A4ARViewing";
 import ModeCRoot from "@/modes/c/ModeCRoot";
 import Landing from "@/pages/Landing";
 import NotFound from "@/pages/NotFound";
@@ -14,6 +12,12 @@ import NotFound from "@/pages/NotFound";
 // and Mode A eat the ~1 MB three.js bundle plus a ~10 MB glTF preload
 // for no reason.
 const B2Viewer = lazy(() => import("@/modes/b/screens/B2Viewer"));
+
+// Lazy-load the AR view so the whole tracking stack — zxing QR reader, the
+// three.js render layer, and (dynamically, one level deeper) the ~8 MB OpenCV
+// WASM — stays out of the main bundle. A visitor on Landing or in Mode B must
+// never pay for it; only a deep-link into /a/scan|/a/view pulls this chunk.
+const ARView = lazy(() => import("@/modes/a/screens/ARView"));
 
 // Dev-only sandbox for eyeballing the Mode A mock placements without a
 // camera. Lazy for the same three.js-bundle reason as B2. Dev-only by
@@ -34,14 +38,31 @@ function LazyChunkLoading() {
 export const router = createBrowserRouter([
   { path: "/", element: <Landing /> },
 
-  // Mode A · flow: permission → stations → scan/:id → view/:id.
-  // A5 (object drawer) and A6 (next-station guide) are overlays on A4,
-  // not top-level routes; they'll be modal state within A4 (#15 / #16).
+  // Mode A · flow (spec §0.5): a floor QR deep-links straight into the AR
+  // view. A3 (scan) + A4 (viewing) are merged into one ARView screen with an
+  // internal state machine — both /a/scan/:id and /a/view/:id resolve to it so
+  // already-printed QRs and old links keep working. A1 (permission) stays as
+  // the legacy entry; A2 (stations) is now a "no-QR" fallback, not the main
+  // path. A5/A6 land as overlays on ARView later (#15 / #16).
   { path: "/a", element: <Navigate to="/a/permission" replace /> },
   { path: "/a/permission", element: <A1Permission /> },
   { path: "/a/stations", element: <A2StationPicker /> },
-  { path: "/a/scan/:stationId", element: <A3QRScan /> },
-  { path: "/a/view/:stationId", element: <A4ARViewing /> },
+  {
+    path: "/a/scan/:stationId",
+    element: (
+      <Suspense fallback={<LazyChunkLoading />}>
+        <ARView />
+      </Suspense>
+    ),
+  },
+  {
+    path: "/a/view/:stationId",
+    element: (
+      <Suspense fallback={<LazyChunkLoading />}>
+        <ARView />
+      </Suspense>
+    ),
+  },
 
   // Mode B · 3D viewer. B1 loading (#18), B3 search (#20), B4 list (#21)
   // land as sub-routes of /b; right now /b = B2 viewer directly.
