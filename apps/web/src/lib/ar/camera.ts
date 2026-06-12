@@ -13,8 +13,14 @@
  */
 
 const TRACKING_VIDEO: MediaTrackConstraints = {
-  width: { ideal: 1280 },
-  height: { ideal: 720 },
+  // 4:3, not 16:9: every 16:9 video mode is a vertical crop of the 4:3
+  // sensor, which is why 720p/1080p both look "zoomed in" next to the
+  // native camera app (whose preview is 4:3). Asking for 1920×1440
+  // keeps the full sensor FOV; intrinsics in coords.ts scale with the
+  // actual delivered frame size, so pose math is unaffected.
+  width: { ideal: 1920 },
+  height: { ideal: 1440 },
+  aspectRatio: { ideal: 4 / 3 },
 };
 
 export async function openArCamera(): Promise<MediaStream> {

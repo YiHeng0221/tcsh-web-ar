@@ -125,6 +125,12 @@ export type QrDetectorOptions = {
   qrDimension?: number;
   /** Called on every successful decode (throttled). */
   onDetection: (detection: QrDetection) => void;
+  /**
+   * Called on every decode attempt (throttled), success or not — lets a
+   * debug HUD distinguish "loop not running" from "running but no QR
+   * found". Keep the body trivial; this fires ~10×/s while scanning.
+   */
+  onAttempt?: (decoded: boolean) => void;
 };
 
 /**
@@ -138,17 +144,22 @@ export class QrDetector {
   private readonly throttleMs: number;
   private readonly qrDimension: number;
   private readonly onDetection: (d: QrDetection) => void;
+  private readonly onAttempt?: (decoded: boolean) => void;
 
   private video: HTMLVideoElement | null = null;
   private running = false;
   private lastAttempt = 0;
   private rafId: number | null = null;
   private vfcId: number | null = null;
+  private watchdogId: number | null = null;
+  private tickCount = 0;
+  private forceRaf = false;
 
   constructor(opts: QrDetectorOptions) {
     this.throttleMs = opts.throttleMs ?? DEFAULT_THROTTLE_MS;
     this.qrDimension = opts.qrDimension ?? DEFAULT_QR_DIMENSION;
     this.onDetection = opts.onDetection;
+    this.onAttempt = opts.onAttempt;
   }
 
   start(video: HTMLVideoElement): void {
@@ -164,8 +175,26 @@ export class QrDetector {
       requestVideoFrameCallback?: (cb: () => void) => number;
       cancelVideoFrameCallback?: (id: number) => void;
     };
-    if (typeof v.requestVideoFrameCallback === "function") {
+    if (!this.forceRaf && typeof v.requestVideoFrameCallback === "function") {
       this.vfcId = v.requestVideoFrameCallback(() => this.tick());
+      // Watchdog: iOS Safari has been seen never delivering rVFC on a
+      // just-attached getUserMedia stream (field bug 2026-06-13:
+      // attempts=0 forever). If no tick lands within 1.5s, permanently
+      // fall back to the rAF loop — costs a little battery, but a dead
+      // scan loop costs the whole feature.
+      if (this.watchdogId == null) {
+        this.watchdogId = window.setTimeout(() => {
+          this.watchdogId = null;
+          if (this.running && this.tickCount === 0) {
+            this.forceRaf = true;
+            if (this.vfcId != null && v.cancelVideoFrameCallback) {
+              v.cancelVideoFrameCallback(this.vfcId);
+              this.vfcId = null;
+            }
+            this.scheduleNext();
+          }
+        }, 1500);
+      }
     } else {
       this.rafId = requestAnimationFrame(() => this.tick());
     }
@@ -173,6 +202,7 @@ export class QrDetector {
 
   private tick(): void {
     if (!this.running || !this.video) return;
+    this.tickCount += 1;
     const now =
       typeof performance !== "undefined" ? performance.now() : Date.now();
     if (now - this.lastAttempt >= this.throttleMs) {
@@ -189,9 +219,14 @@ export class QrDetector {
       result = this.reader.decode(this.video);
     } catch {
       // NotFoundException etc. — no QR this frame, normal. Keep scanning.
+      this.onAttempt?.(false);
       return;
     }
-    if (!result) return;
+    if (!result) {
+      this.onAttempt?.(false);
+      return;
+    }
+    this.onAttempt?.(true);
     const text = result.getText();
     const payload = parseStationPayload(text);
     const corners =
@@ -206,6 +241,10 @@ export class QrDetector {
     const v = this.video as
       | (HTMLVideoElement & { cancelVideoFrameCallback?: (id: number) => void })
       | null;
+    if (this.watchdogId != null) {
+      window.clearTimeout(this.watchdogId);
+      this.watchdogId = null;
+    }
     if (this.vfcId != null && v?.cancelVideoFrameCallback) {
       v.cancelVideoFrameCallback(this.vfcId);
     }
