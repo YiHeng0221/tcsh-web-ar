@@ -309,17 +309,25 @@ make docker-up
 
 ## Scripts（Makefile targets）
 
+跑 `make` 或 `make help` 會印出完整分組清單。常用指令：
+
 | 指令                | 做什麼                                                |
 | ------------------- | ----------------------------------------------------- |
-| `make install`      | 安裝 Python（uv）與 JS（Bun）依賴                     |
+| `make setup`        | 安裝 Python（uv）與 JS（Bun）依賴（`make install` 同義）|
 | `make dev`          | 本地同時啟動 api 與 web dev server                    |
 | `make dev-api`      | 只跑 FastAPI server                                   |
 | `make dev-web`      | 只跑 Vite dev server                                  |
+| `make dev-https`    | Vite 綁 LAN，搭配 mkcert 給手機測試用                  |
 | `make docker-up`    | 用 docker-compose build 並啟動所有 service            |
 | `make docker-down`  | 停止並移除 container                                  |
 | `make lint`         | 對兩個 app 執行 linter                                |
-| `make test`         | 跑測試                                                 |
+| `make format`       | 兩個 app 自動 format（ruff / eslint --fix）           |
 | `make typecheck`    | Python 跑 `mypy`、TS 跑 `tsc --noEmit`                |
+| `make test`         | 跑測試                                                 |
+| `make build`        | 建 api docker image 與 web production bundle          |
+| `make db-upgrade`   | `alembic upgrade head`                                |
+| `make db-revision MSG="…"` | 自動產生新 alembic revision                    |
+| `make clean`        | 清快取、`dist/`、`node_modules`                       |
 
 ---
 
