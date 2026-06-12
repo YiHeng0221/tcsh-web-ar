@@ -93,3 +93,45 @@ export function loadXR8(src: string = XR8_ENGINE_URL): Promise<XR8Static> {
 
   return loadPromise;
 }
+
+
+/** jsDelivr-hosted XRExtras (official helper modules — FullWindowCanvas,
+ *  loading UI). Same provenance pattern as the engine binary; see the
+ *  official aframe-world-effects-example which loads exactly this URL. */
+export const XREXTRAS_URL =
+  "https://cdn.jsdelivr.net/npm/@8thwall/xrextras@1/dist/xrextras.js";
+
+let xrExtrasPromise: Promise<XRExtrasStatic> | null = null;
+
+/** Inject the XRExtras script (once) and resolve with the global. */
+export function loadXRExtras(
+  src: string = XREXTRAS_URL,
+): Promise<XRExtrasStatic> {
+  if (xrExtrasPromise) return xrExtrasPromise;
+  xrExtrasPromise = new Promise<XRExtrasStatic>((resolve, reject) => {
+    const w = window as unknown as { XRExtras?: XRExtrasStatic };
+    if (w.XRExtras) {
+      resolve(w.XRExtras);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.crossOrigin = "anonymous";
+    script.onload = (): void => {
+      if (w.XRExtras) resolve(w.XRExtras);
+      else reject(new Error("xrextras loaded but global missing"));
+    };
+    script.onerror = (): void =>
+      reject(new Error(`Failed to load XRExtras from ${src}`));
+    document.head.appendChild(script);
+  });
+  return xrExtrasPromise;
+}
+
+/** Minimal structural type for what we use from XRExtras. */
+export type XRExtrasStatic = {
+  FullWindowCanvas: {
+    pipelineModule: () => { name: string } & Record<string, unknown>;
+  };
+};
