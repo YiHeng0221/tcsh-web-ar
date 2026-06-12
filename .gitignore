@@ -41,6 +41,15 @@ certs/
 apps/web/dist
 apps/api/.coverage
 
+# ─── binary assets (served from object storage in prod) ─────
+# Dev keeps glTF / texture binaries under apps/web/public/models/ so
+# Vite can serve them locally. In production they live in Supabase
+# Storage per CLAUDE.md; see apps/web/public/models/README.md.
+apps/web/public/models/*.glb
+apps/web/public/models/*.gltf
+apps/web/public/models/*.bin
+apps/web/public/models/*.ktx2
+
 # ─── claude code ─────────────────────────
 # Per-agent worktree backups created by Claude Code workflows. Local-only
 # scratch; never commit. `.claude/agents/`, `.claude/commands/`, and
