@@ -283,8 +283,8 @@ Dockerfile 跟 compose 檔每一段在做什麼，看 `docs/docker.md`。
 - **Docker build 每次都很慢** — 確認每個 app 資料夾都有 `.dockerignore`
   這樣 Docker 才不會把 `node_modules` 或 `.venv` 塞進 build context。
 - **手機在 dev 環境 `getUserMedia` 不能用** — 相機 API 需要 HTTPS。
-  要嘛部署到 preview URL，要嘛用 Vite 的 HTTPS 模式 + 本機憑證
-  （mkcert 最簡單）。
+  跑 `make web-dev-https` 啟動 mkcert 簽好的 dev server，並按
+  `docs/dev/https-local.md` 把 root CA 裝到 iPhone 上。
 
 ---
 

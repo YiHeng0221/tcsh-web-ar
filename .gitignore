@@ -30,6 +30,13 @@ bun.lockb
 # ─── docker ──────────────────────────────
 .docker-data/
 
+# ─── certs (mkcert / vite-plugin-mkcert) ─
+*.pem
+*.crt
+*.key
+.cert/
+certs/
+
 # ─── project ─────────────────────────────
 apps/web/dist
 apps/api/.coverage
