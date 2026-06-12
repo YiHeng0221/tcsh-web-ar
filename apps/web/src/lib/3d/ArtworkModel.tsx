@@ -8,6 +8,23 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 
 import { ARTWORK_MODEL_URL } from "./artworkUrl";
 
+/**
+ * Queue the glTF fetch. Called by the mode-B / mode-C screen components
+ * on mount — intentionally not a module top-level side effect, so
+ * importing this module (e.g. because react-router's code-split chunk
+ * gets pre-parsed) doesn't itself trigger a ~10 MB download before the
+ * user visits Mode B.
+ *
+ * Naming note: `useGLTF.preload` is drei's *static* prefetch method (it
+ * is not a React hook despite being attached to a `use*` namespace), so
+ * this wrapper is a plain function. It is deliberately not named
+ * `usePreloadArtwork` to avoid tripping the rules-of-hooks lint check —
+ * call sites use it from `useEffect`, not as a hook.
+ */
+export function queueArtworkPreload(): void {
+  useGLTF.preload(ARTWORK_MODEL_URL);
+}
+
 type Props = {
   /** Multiplier on the longest bbox axis when placing the camera. 1 = snug,
    *  higher = more margin. Defaults to 1.8 — comfortable framing. */

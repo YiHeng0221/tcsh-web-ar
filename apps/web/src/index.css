@@ -33,6 +33,19 @@
   --color-a1-ink-soft: #333333;
   --color-a1-caption: #666666;
   --color-a1-hairline: #eeeeee;
+
+  /* Mode C · admin (Studio) palette — light, neutral, desktop-only.
+     Distinct from the dark AR theme. C1-C6 share these tokens; tweak in
+     one place when the Figma palette moves. */
+  --color-c-bg: #fafafa;
+  --color-c-surface: #ffffff;
+  --color-c-ink: #1a1a1a;
+  --color-c-ink-soft: #333333;
+  --color-c-muted: #8a8a8a;
+  --color-c-placeholder: #b8b8b8;
+  --color-c-hairline: #ececec;
+  --color-c-hairline-strong: #d4d4d4;
+  --color-c-hover: #f4f4f4;
 }
 
 @layer base {
