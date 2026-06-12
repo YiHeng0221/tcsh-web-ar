@@ -62,6 +62,14 @@ export default function B2Viewer() {
     setHintsVisible(false);
   }, []);
 
+  // Mode switch 3D → AR. Mirrors ARView's switch; lands on the scan screen
+  // so the visitor re-anchors at whatever station QR is nearby. sessionStorage
+  // remembers the last station for a smarter default landing.
+  const switchToAr = useCallback(() => {
+    const last = window.sessionStorage.getItem("tcsh:last-station");
+    navigate(last ? `/a/scan/${last}` : "/a");
+  }, [navigate]);
+
   // useCallback for the same reference-stability reason as dismissHints
   // above — keeping all three handlers symmetric also stops readers from
   // wondering whether the bare-function ones are intentionally unstable.
@@ -95,7 +103,7 @@ export default function B2Viewer() {
       data-screen="b2"
       className="relative flex h-dvh w-screen flex-col overflow-hidden bg-bg text-fg"
     >
-      <TopBar onBack={handleBack} />
+      <TopBar onBack={handleBack} onSwitchToAr={switchToAr} />
 
       <div className="relative flex-1">
         <ModelErrorBoundary onRetry={retryLoad}>
@@ -169,7 +177,13 @@ function LoadingOverlay({ ready }: { ready: boolean }) {
 }
 
 // ── Top bar ────────────────────────────────────────────────────────────
-function TopBar({ onBack }: { onBack: () => void }) {
+function TopBar({
+  onBack,
+  onSwitchToAr,
+}: {
+  onBack: () => void;
+  onSwitchToAr: () => void;
+}) {
   return (
     <header className="safe-area absolute inset-x-0 top-0 z-10 flex h-[92px] items-end justify-between bg-gradient-to-b from-black/80 to-transparent px-3 pb-3">
       <button
@@ -182,13 +196,16 @@ function TopBar({ onBack }: { onBack: () => void }) {
         ‹
       </button>
       <h1 className="text-sm font-medium">3D 檢視</h1>
+      {/* Mirror of ARView's top-right mode switch — the two modes must be
+          mutually reachable (user requirement 2026-06-13). */}
       <button
         type="button"
-        aria-label="更多選項"
-        disabled
-        className="flex h-10 w-10 items-center justify-center text-xl leading-none text-fg disabled:opacity-40"
+        onClick={onSwitchToAr}
+        aria-label="切換到 AR（Mode A）"
+        data-testid="mode-b-switch-ar"
+        className="rounded-full bg-black/60 px-4 py-2 text-sm font-medium text-fg backdrop-blur"
       >
-        ⋮
+        <span className="text-muted">AR</span> ｜ 3D
       </button>
     </header>
   );
