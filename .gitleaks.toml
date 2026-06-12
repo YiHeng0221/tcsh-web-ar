@@ -1,0 +1,18 @@
+# gitleaks config — extends the default ruleset.
+#
+# CI runs `gitleaks detect` over the full git history (fetch-depth: 0), so
+# false positives in OLD commits fail every future PR until allowlisted here.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives"
+regexes = [
+  # Discord *user* ID hardcoded in a long-deleted workflow file
+  # (.github/workflows/ai-review.yml @ d3afc96, 2026-04-18). Discord IDs are
+  # public snowflake identifiers, not credentials — the matching
+  # `discord-client-id` rule is a false positive here. The current harness
+  # injects it via the DISCORD_USER_ID secret instead.
+  '''965795042805559417''',
+]
