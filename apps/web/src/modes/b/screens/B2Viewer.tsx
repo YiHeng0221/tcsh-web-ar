@@ -1,9 +1,10 @@
-import { OrbitControls } from "@react-three/drei";
+import { OrbitControls, useGLTF } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ArtworkModel } from "@/lib/3d/ArtworkModel";
+import { ARTWORK_MODEL_URL } from "@/lib/3d/artworkUrl";
 import { ModelErrorBoundary } from "@/lib/3d/ModelErrorBoundary";
 
 /**
@@ -19,7 +20,13 @@ import { ModelErrorBoundary } from "@/lib/3d/ModelErrorBoundary";
  */
 export default function B2Viewer() {
   const navigate = useNavigate();
-  const [hintsVisible, setHintsVisible] = useState(false);
+  // Lazy initialiser instead of a post-mount effect: reading localStorage
+  // during the first render means first-time visitors see the overlay on
+  // the very first paint (an effect-based flip leaves one frame where the
+  // bare canvas flashes through).
+  const [hintsVisible, setHintsVisible] = useState(
+    () => localStorage.getItem(GESTURE_HINTS_KEY) !== "1",
+  );
   // Bumping this key remounts ArtworkModel, which re-runs its recentre +
   // camera-fit effect. Cheaper than threading a framing API through props.
   const [fitKey, setFitKey] = useState(0);
@@ -32,11 +39,6 @@ export default function B2Viewer() {
   // trigger the fetch via Suspense before any effect runs here, so a
   // useEffect calling `useGLTF.preload` would be a no-op (the cache entry
   // exists by the time effects fire). Drop the dead preload effect.
-
-  useEffect(() => {
-    const seen = localStorage.getItem(GESTURE_HINTS_KEY) === "1";
-    setHintsVisible(!seen);
-  }, []);
 
   const handleModelReady = useCallback(() => {
     setModelReady(true);
@@ -53,18 +55,32 @@ export default function B2Viewer() {
     setHintsVisible(false);
   }, []);
 
-  function handleBack() {
+  // useCallback for the same reference-stability reason as dismissHints
+  // above — keeping all three handlers symmetric also stops readers from
+  // wondering whether the bare-function ones are intentionally unstable.
+  const handleBack = useCallback(() => {
     if (window.history.length > 1) navigate(-1);
     else navigate("/", { replace: true });
-  }
+  }, [navigate]);
 
-  function resetView() {
+  const resetView = useCallback(() => {
     // Remount ArtworkModel. Flip ready back to false so LoadingOverlay can
     // re-arm; the new mount's useLayoutEffect will call onReady again once
     // the camera-fit pass completes.
     setModelReady(false);
     setFitKey((n) => n + 1);
-  }
+  }, []);
+
+  const retryLoad = useCallback(() => {
+    // drei's useGLTF caches via suspend-react, which memoises *rejected*
+    // promises by URL — remounting alone would instantly re-throw the
+    // cached rejection and the retry button would appear dead. Clearing
+    // the cache entry first forces a genuine re-fetch. Kept separate from
+    // resetView so a plain camera reset never drops the (expensive)
+    // loaded-model cache.
+    useGLTF.clear(ARTWORK_MODEL_URL);
+    resetView();
+  }, [resetView]);
 
   return (
     <main
@@ -75,7 +91,7 @@ export default function B2Viewer() {
       <TopBar onBack={handleBack} />
 
       <div className="relative flex-1">
-        <ModelErrorBoundary onRetry={resetView}>
+        <ModelErrorBoundary onRetry={retryLoad}>
           <Canvas
             dpr={[1, 2]}
             // fov 40 reads comfortably for artwork presentation. Camera

@@ -82,6 +82,12 @@ export function ArtworkModel({ framing = 1.8, onReady }: Props = {}) {
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
 
+    // On the very first mount `controls` is still null — drei's
+    // <OrbitControls makeDefault> registers itself in the R3F store via a
+    // useEffect, which runs after this sibling useLayoutEffect. That's
+    // fine: OrbitControls' default target is already (0,0,0). On fitKey
+    // remounts the controls instance exists, so the explicit set keeps a
+    // user-panned target from surviving a reset.
     if (controls) {
       controls.target.set(0, 0, 0);
       controls.update();
@@ -108,6 +114,11 @@ export function ArtworkModel({ framing = 1.8, onReady }: Props = {}) {
         }
       });
     };
+    // Invariant behind the empty deps: ARTWORK_MODEL_URL is a
+    // module-level const (src/lib/3d/artworkUrl.ts), so the glTF — and
+    // therefore `scene` — cannot change during one mount's lifetime. If
+    // the URL ever becomes a prop, this cleanup must capture `scene` via
+    // deps or it will dispose the wrong clone.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
