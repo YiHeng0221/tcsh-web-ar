@@ -1,27 +1,35 @@
 /**
- * `usePlacements(stationId)` — the single data boundary the ARView render
- * layer reads from. It hands back a flat, render-ready list of quads
- * (position / rotation quaternion / scale + texture URL) for the given
- * station, decoupling the R3F layer from where that data comes from.
+ * `usePlacements(stationId)` — the single data boundary the AR render layer
+ * reads from. Hands back a flat, render-ready list of quads (position /
+ * rotation quaternion / scale + texture URL) for the given station.
  *
- * ── MOCK → API SWITCH POINT ────────────────────────────────────────────────
- * Today this returns the in-repo `MOCK_PLACEMENTS` fixture whenever the
- * scanned station is the demo station (`demo-01`); other stations resolve to
- * an empty list (nothing seeded yet). When the backend placements pipeline is
- * wired up, replace the body of `useMockPlacements` with a TanStack Query that
- * hits `GET /api/placements?anchor_id={stationId}` and maps each
- * `PlacementOut` (`transform.position` / `.rotation` / `.scale` Vec3/Quat +
- * `texture_id` → `/api/textures/{texture_id}/file`) into `RenderPlacement`.
- * The shape below already mirrors `Transform`, so the swap is type-compatible
- * and nothing in ARView changes. The query key MUST include `stationId`
- * (REVIEW.md: TanStack keys include all inputs that affect the response).
+ * Wired to the real API (2026-06-13):
+ *
+ *   1. The QR encodes the station's human-readable LABEL (`demo-01`); the
+ *      API keys placements by anchor UUID. We resolve label → UUID off the
+ *      (tiny, ≤ a dozen rows) `GET /anchors` list — no bespoke endpoint
+ *      needed, and the list is cached for the whole session.
+ *   2. `GET /placements?anchor_id={uuid}` → map each `PlacementOut`'s
+ *      `transform` into a `RenderPlacement`. Texture binaries come from the
+ *      API's own URL (`/textures/{id}/file`) through the same-origin `/api`
+ *      proxy, so phones on LAN + the HTTPS dev origin both work (mixed
+ *      content stays impossible by construction).
+ *   3. Placements without a texture are dropped — Mode A renders textured
+ *      quads only (an untextured placement has nothing to show).
+ *
+ * Demo resilience: if the API is unreachable AND the station is the demo
+ * station, fall back to the in-repo mock fixture (identical coordinates —
+ * the seed mirrors it) so a dead backend can't brick a field demo.
  *
  * No placement *logic* lives here (CLAUDE.md hard rule): the client renders
  * placements, it does not decide them.
  */
 
+import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
+import type { Anchor, Placement } from "@/lib/api";
+import { apiGet } from "@/lib/api/client";
 import { MOCK_PLACEMENTS, MOCK_STATION_ID } from "@/lib/ar/mock-placements";
 
 /** A render-ready quad in the anchor frame (metres). Mirrors `Transform`. */
@@ -42,24 +50,84 @@ export type UsePlacementsResult = {
   error: unknown;
 };
 
-export function usePlacements(stationId: string | undefined): UsePlacementsResult {
-  // The mock fixture is the only source for now. `useMemo` keeps the array
-  // reference stable so the R3F children don't re-key every render.
-  const placements = useMemo<RenderPlacement[]>(() => {
-    if (stationId === MOCK_STATION_ID) {
-      // MockPlacement already matches RenderPlacement structurally.
-      return MOCK_PLACEMENTS.map((p) => ({
-        id: p.id,
-        textureUrl: p.textureUrl,
-        position: p.position,
-        rotation: p.rotation,
-        scale: p.scale,
-      }));
-    }
-    // TODO(api): non-demo stations have no seeded mock data — once the
-    // placements API lands, this branch fetches by anchor_id instead.
-    return [];
-  }, [stationId]);
+/** Same-origin API prefix (matches lib/api/client.ts's BASE). */
+const API_PREFIX = "/api";
 
-  return { placements, isLoading: false, error: null };
+function toRenderPlacement(p: Placement): RenderPlacement | null {
+  if (!p.texture_id) return null; // nothing to draw without a texture
+  const t = p.transform;
+  return {
+    id: p.id,
+    textureUrl: `${API_PREFIX}/textures/${p.texture_id}/file`,
+    position: [t.position.x, t.position.y, t.position.z],
+    rotation: [t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w],
+    scale: [t.scale.x, t.scale.y, t.scale.z],
+  };
+}
+
+function mockFallback(stationId: string | undefined): RenderPlacement[] {
+  if (stationId !== MOCK_STATION_ID) return [];
+  return MOCK_PLACEMENTS.map((p) => ({
+    id: p.id,
+    textureUrl: p.textureUrl,
+    position: p.position,
+    rotation: p.rotation,
+    scale: p.scale,
+  }));
+}
+
+export function usePlacements(
+  stationId: string | undefined,
+): UsePlacementsResult {
+  // Label → UUID. The anchors list is small and session-stable; one query
+  // serves every station the visitor walks to.
+  const anchorsQuery = useQuery({
+    queryKey: ["anchors"],
+    queryFn: ({ signal }) => apiGet<Anchor[]>("/anchors", { signal }),
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  });
+
+  const anchorId = useMemo(() => {
+    if (!stationId || !anchorsQuery.data) return undefined;
+    return anchorsQuery.data.find((a: Anchor) => a.label === stationId)?.id;
+  }, [stationId, anchorsQuery.data]);
+
+  // Query key includes everything that shapes the response (REVIEW.md).
+  const placementsQuery = useQuery({
+    queryKey: ["placements", "by-anchor", anchorId],
+    queryFn: ({ signal }) =>
+      apiGet<Placement[]>(`/placements?anchor_id=${anchorId}`, { signal }),
+    enabled: anchorId != null,
+    staleTime: 60 * 1000,
+    retry: 1,
+  });
+
+  const placements = useMemo<RenderPlacement[]>(() => {
+    if (placementsQuery.data) {
+      return placementsQuery.data
+        .map((p: Placement) => toRenderPlacement(p))
+        .filter((p: RenderPlacement | null): p is RenderPlacement => p !== null);
+    }
+    // API path not (yet) available. While loading, render nothing — the
+    // quads pop in when data lands. On ERROR, keep the field demo alive
+    // with the mock fixture (same coordinates as the seed).
+    if (anchorsQuery.isError || placementsQuery.isError) {
+      return mockFallback(stationId);
+    }
+    return [];
+  }, [
+    placementsQuery.data,
+    placementsQuery.isError,
+    anchorsQuery.isError,
+    stationId,
+  ]);
+
+  return {
+    placements,
+    isLoading:
+      anchorsQuery.isLoading ||
+      (anchorId != null && placementsQuery.isLoading),
+    error: anchorsQuery.error ?? placementsQuery.error ?? null,
+  };
 }
