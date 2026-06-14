@@ -80,6 +80,7 @@ class Settings(BaseSettings):
             "image/png",
             "image/webp",
             "image/ktx2",
+            "model/gltf-binary",
         ],
     )
     texture_max_size_bytes: int = Field(default=10 * 1024 * 1024)  # 10 MB

@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 # `«KTX 20»\r\n\x1a\n`. `filetype` (v1.x) can't detect ktx2, so uploads
 # declaring image/ktx2 are checked against this manually in _validate.
 _KTX2_MAGIC = b"\xabKTX 20\xbb\r\n\x1a\n"
+# glTF binary container magic — the first 4 bytes of every .glb file.
+_GLB_MAGIC = b"glTF"
 
 
 class TextureService:
@@ -92,6 +94,16 @@ class TextureService:
                 raise InvalidMimeError(
                     "file content is not a valid KTX2 texture "
                     "(KTX 20 signature missing)"
+                )
+        elif mime_type.lower() == "model/gltf-binary":
+            # glTF binary (.glb) starts with the 4-byte magic "glTF"; the
+            # `filetype` library doesn't know it, so verify by hand — same
+            # reasoning as ktx2. A placement texture may be a 3D model, not
+            # just a 2D image (Mode C requirement 2026-06-15).
+            if not data.startswith(_GLB_MAGIC):
+                raise InvalidMimeError(
+                    "file content is not a valid glTF binary "
+                    "(glTF signature missing)"
                 )
         else:
             detected = filetype.guess_mime(data)

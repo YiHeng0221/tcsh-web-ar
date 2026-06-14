@@ -26,3 +26,11 @@ class TextureOut(BaseModel):
     @property
     def file_url(self) -> str:
         return f"/textures/{self.id}/file"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def kind(self) -> str:
+        """Render-path discriminator for the client: a glTF binary is a 3D
+        model placed as-is; everything else is a 2D image drawn on a quad.
+        Derived from the mime type so the client never sniffs bytes."""
+        return "model" if self.mime_type == "model/gltf-binary" else "image"

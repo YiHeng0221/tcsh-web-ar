@@ -48,6 +48,8 @@ class PlacementBase(BaseModel):
     texture_id: UUID | None = None
     transform: Transform
     uv_transform: UVTransform | None = None
+    # Visibility toggle (Mode C hides without deleting). Default visible.
+    is_show: bool = True
 
 
 class PlacementCreate(PlacementBase):
@@ -66,6 +68,7 @@ class PlacementUpdate(BaseModel):
     texture_id: UUID | None = None
     transform: Transform | None = None
     uv_transform: UVTransform | None = None
+    is_show: bool | None = None
 
 
 class PlacementOut(PlacementBase):

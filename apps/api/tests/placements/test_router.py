@@ -352,3 +352,50 @@ async def test_validation_rejects_non_unit_quaternion(
     )
     bad = await client.post("/placements", json=payload2)
     assert bad.status_code == 422
+
+
+async def test_placement_defaults_to_visible(
+    client: AsyncClient,
+    object_id: str,
+    anchor_id: str,
+    make_placement_payload: Callable[..., dict[str, Any]],
+) -> None:
+    """is_show defaults to true when the create body omits it."""
+    payload = make_placement_payload(ar_object_id=object_id, anchor_id=anchor_id)
+    assert "is_show" not in payload
+    created = await client.post("/placements", json=payload)
+    assert created.status_code == 201, created.text
+    assert created.json()["is_show"] is True
+
+
+async def test_placement_is_show_round_trips_and_patches(
+    client: AsyncClient,
+    object_id: str,
+    anchor_id: str,
+    make_placement_payload: Callable[..., dict[str, Any]],
+) -> None:
+    """is_show is settable on create and toggleable via PATCH."""
+    payload = make_placement_payload(ar_object_id=object_id, anchor_id=anchor_id)
+    payload["is_show"] = False
+    created = await client.post("/placements", json=payload)
+    assert created.status_code == 201, created.text
+    placement_id = created.json()["id"]
+    assert created.json()["is_show"] is False
+
+    patched = await client.patch(
+        f"/placements/{placement_id}", json={"is_show": True}
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["is_show"] is True
+
+    # A PATCH that omits is_show must not silently flip it back.
+    other = await client.patch(
+        f"/placements/{placement_id}",
+        json={
+            "transform": make_placement_payload(
+                ar_object_id=object_id, anchor_id=anchor_id
+            )["transform"]
+        },
+    )
+    assert other.status_code == 200
+    assert other.json()["is_show"] is True
