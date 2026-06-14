@@ -16,12 +16,16 @@
  * NOT auto-dispose user-created resources).
  */
 
+import { useGLTF } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   DoubleSide,
   type Group,
+  type Material,
+  Mesh,
   MeshBasicMaterial,
+  type Object3D,
   PlaneGeometry,
   type Texture,
   TextureLoader,
@@ -203,15 +207,21 @@ function ARSceneInner({
         videoHeight={videoHeight}
       />
       <ambientLight intensity={1} />
-      {placements.map((p) => (
-        <PlacementQuad
-          key={p.id}
-          placement={p}
-          geometry={geometry}
-          cache={cache}
-          debug={debug}
-        />
-      ))}
+      {placements.map((p) =>
+        p.kind === "model" ? (
+          <Suspense key={p.id} fallback={null}>
+            <PlacementGlb placement={p} />
+          </Suspense>
+        ) : (
+          <PlacementQuad
+            key={p.id}
+            placement={p}
+            geometry={geometry}
+            cache={cache}
+            debug={debug}
+          />
+        ),
+      )}
       {debug && (
         <>
           {/* Anchor-frame visualisation: RGB axes at the QR origin
@@ -282,6 +292,55 @@ function PlacementQuad({
         </mesh>
       )}
     </group>
+  );
+}
+
+/**
+ * A "model"-kind placement: the texture URL is a glTF binary, rendered
+ * as-is at the placement transform (Mode C lets an artist upload a 3D
+ * model instead of a flat image). Deep-clones the cached glTF so each
+ * placement owns disposable GPU resources; textures stay with drei's
+ * useGLTF cache. Mirrors Mode C's PlacementGlbTexture + ArtworkModel
+ * disposal convention (REVIEW.md red line: r3f doesn't auto-dispose).
+ */
+function PlacementGlb({ placement }: { placement: RenderPlacement }) {
+  const gltf = useGLTF(placement.textureUrl) as unknown as { scene: Object3D };
+
+  const scene = useMemo(() => {
+    const cloned = gltf.scene.clone(true);
+    cloned.traverse((node) => {
+      const mesh = node as Mesh & { isMesh?: boolean };
+      if (!mesh.isMesh) return;
+      mesh.geometry = mesh.geometry.clone();
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map((m) => m.clone())
+        : mesh.material.clone();
+    });
+    return cloned;
+  }, [gltf.scene]);
+
+  const sceneRef = useRef(scene);
+  sceneRef.current = scene;
+  useEffect(() => {
+    return () => {
+      sceneRef.current.traverse((node) => {
+        const mesh = node as Mesh & { isMesh?: boolean };
+        if (!mesh.isMesh) return;
+        mesh.geometry?.dispose();
+        const mat = mesh.material as Material | Material[];
+        if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+        else mat.dispose();
+      });
+    };
+  }, []);
+
+  return (
+    <primitive
+      object={scene}
+      position={placement.position}
+      quaternion={placement.rotation}
+      scale={placement.scale}
+    />
   );
 }
 
