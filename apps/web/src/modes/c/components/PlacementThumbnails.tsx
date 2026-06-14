@@ -10,6 +10,9 @@ type Props = {
   textures: Texture[];
   selectedId: string | null;
   onSelect: (placementId: string) => void;
+  /** Toggle a placement's `is_show` from the strip. The per-tile checkbox
+   *  is the "list" entry point the spec asks for (alongside the sidebar's). */
+  onToggleShow: (placementId: string, next: boolean) => void;
 };
 
 /**
@@ -28,6 +31,7 @@ export function PlacementThumbnails({
   textures,
   selectedId,
   onSelect,
+  onToggleShow,
 }: Props) {
   // Memoised: this strip re-renders on every selection change (arrow-key
   // navigation), and the map only depends on the textures list.
@@ -45,32 +49,53 @@ export function PlacementThumbnails({
       {placements.map((p) => {
         const isSelected = p.id === selectedId;
         const texture = p.texture_id ? textureById.get(p.texture_id) : null;
+        const isShow = p.is_show !== false;
         return (
-          <button
-            key={p.id}
-            type="button"
-            onClick={() => onSelect(p.id)}
-            aria-pressed={isSelected}
-            aria-label={`Placement ${p.id.slice(0, 8)}`}
-            className={[
-              "relative h-[60px] w-[60px] shrink-0 overflow-hidden rounded-md border bg-surface transition-colors",
-              isSelected
-                ? "border-accent ring-2 ring-accent/40"
-                : "border-border hover:border-fg",
-            ].join(" ")}
-          >
-            {texture ? (
-              <img
-                src={textureUrl(texture)}
-                alt=""
-                className="h-full w-full object-cover"
+          <div key={p.id} className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => onSelect(p.id)}
+              aria-pressed={isSelected}
+              aria-label={`Placement ${p.id.slice(0, 8)}`}
+              className={[
+                "relative block h-[60px] w-[60px] overflow-hidden rounded-md border bg-surface transition-colors",
+                isSelected
+                  ? "border-accent ring-2 ring-accent/40"
+                  : "border-border hover:border-fg",
+                // Hidden placements read faded so the strip mirrors the
+                // preview canvas at a glance.
+                isShow ? "" : "opacity-40",
+              ].join(" ")}
+            >
+              {texture ? (
+                <img
+                  src={textureUrl(texture)}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-[10px] text-muted">
+                  ∅
+                </div>
+              )}
+            </button>
+            {/* is_show checkbox — the "list" toggle entry point. Sits over
+                the tile so the strip stays compact; stop propagation so a
+                toggle click doesn't also select the placement. */}
+            <label
+              className="absolute left-1 top-1 flex h-4 w-4 cursor-pointer items-center justify-center rounded bg-black/60"
+              title={isShow ? "於預覽 / AR 顯示" : "已隱藏（不顯示）"}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                checked={isShow}
+                onChange={(e) => onToggleShow(p.id, e.target.checked)}
+                aria-label={`Placement ${p.id.slice(0, 8)} 顯示`}
+                className="h-3 w-3 accent-accent"
               />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-[10px] text-muted">
-                ∅
-              </div>
-            )}
-          </button>
+            </label>
+          </div>
         );
       })}
       {placements.length === 0 && (
