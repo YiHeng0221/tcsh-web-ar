@@ -1,7 +1,21 @@
-import { Html, OrbitControls } from "@react-three/drei";
+import { Html, OrbitControls, TransformControls, useGLTF } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Camera, Mesh, MeshStandardMaterial, Object3D, Vector3 } from "three";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type {
+  Camera,
+  Group,
+  Mesh,
+  MeshStandardMaterial,
+  Object3D,
+  Vector3,
+} from "three";
 import {
   BoxGeometry,
   CanvasTexture,
@@ -14,26 +28,38 @@ import {
   TextureLoader,
   Vector2,
 } from "three";
+import type { GLTF } from "three-stdlib";
 
 import { ArtworkModel, queueArtworkPreload } from "@/lib/3d/ArtworkModel";
 import { ModelErrorBoundary } from "@/lib/3d/ModelErrorBoundary";
 import type { Placement, Vec3 } from "@/lib/api";
 
+import {
+  IronFrameModel,
+  queueIronFramePreload,
+} from "./IronFrameModel";
+import { classifyPointerGesture } from "../lib/pointerGesture";
 import type { Texture as TextureRecord } from "../lib/textureApi";
-import { textureUrl } from "../lib/textureApi";
+import { textureKind, textureUrl } from "../lib/textureApi";
 import { TEXTURE_DRAG_MIME } from "./TexturePalette";
 
+/** View mode for the editor canvas.
+ *  - `isolation`: render only the bare iron frame + the single selected
+ *    placement. Lets the admin focus on positioning one piece.
+ *  - `preview`: render every `is_show` placement together (frame optional)
+ *    so the admin can sanity-check the whole composition. */
+export type CanvasViewMode = "isolation" | "preview";
+
 /**
- * Right-handed, anchor-relative cube that visualises a single placement
- * inside the editor canvas. The cube uses the placement's `transform`
- * (position + scale) as its world transform; rotation is left to identity
- * because the C5 form doesn't expose euler / quaternion editing yet.
+ * Right-handed, anchor-relative marker that visualises a single placement
+ * inside the editor canvas. An image texture (or empty placement) renders
+ * as a unit cube tinted by the placement's `transform`; a glTF ("model")
+ * texture renders the model itself at the placement transform.
  *
- * The selected placement gets an emissive cyan tint plus an edge outline
- * so the admin can visually confirm what the right-side form is editing.
- *
- * Click handling lives on the cube so R3F's raycaster delivers each hit
- * straight to `onSelect` without the editor needing a separate raycaster.
+ * The selected placement gets an emissive cyan tint plus an edge outline so
+ * the admin can visually confirm what the right-side form is editing. A
+ * placement with `is_show === false` is drawn semi-transparent in preview
+ * so the admin can see it's there but knows it won't ship to AR.
  */
 type PlacementMarkerProps = {
   placement: Placement;
@@ -44,7 +70,12 @@ type PlacementMarkerProps = {
   /** This marker is the current drop target during a texture drag — render
    *  an extra highlight so the admin knows which one will accept the drop. */
   dropHovered: boolean;
-  onSelect: (placementId: string) => void;
+  /** Render dimmed (is_show === false). Visible-but-faded so the admin sees
+   *  it's there yet excluded from the published preview / AR. */
+  dimmed: boolean;
+  /** Ref callback so the parent can hand the selected marker's group to the
+   *  TransformControls gizmo. Only the selected marker registers itself. */
+  groupRef?: (group: Group | null) => void;
 };
 
 /** Custom marker name so the raycaster can filter to placement meshes only
@@ -59,91 +90,54 @@ function PlacementMarker({
   override,
   selected,
   dropHovered,
-  onSelect,
+  dimmed,
+  groupRef,
 }: PlacementMarkerProps) {
-  // Resolve the live (override) transform so dragging form sliders updates
-  // the cube without waiting for a save round-trip.
+  // Resolve the live (override) transform so dragging the gizmo / form
+  // sliders updates the marker without waiting for a save round-trip.
   const position = override?.position ?? placement.transform.position;
   const scale = override?.scale ?? placement.transform.scale;
 
-  // Lazy-load the texture image as a Three texture. We don't go through
-  // drei's `useTexture` here because (a) the URL might be missing
-  // (placement with no texture yet) and (b) we want a graceful fallback to
-  // a flat colour, not a Suspense throw that crashes the canvas.
-  //
-  // Lifecycle: every time the texture record id changes we load a fresh
-  // ThreeTexture and dispose the previous one on cleanup. Without the
-  // explicit dispose the GPU would leak one texture per selection switch
-  // (CLAUDE.md "Dispose geometry/material/texture on unmount — else GPU
-  // leak"). `useState` instead of `useMemo` because we need the latest
-  // value to survive cleanup of stale loads.
   const textureRecord = override?.texture ?? null;
-  const textureRecordId = textureRecord?.id ?? null;
-  const [textureImage, setTextureImage] = useState<ThreeTexture | null>(null);
-  useEffect(() => {
-    if (!textureRecord) {
-      setTextureImage(null);
-      return;
-    }
-    // `TEXTURE_LOADER.load()` is synchronous — it returns a `Texture` object
-    // immediately and the `cancelled` guard cannot protect against anything.
-    // Removed the dead variable; `tex.dispose()` in cleanup is still correct.
-    const tex = TEXTURE_LOADER.load(textureUrl(textureRecord));
-    tex.flipY = false;
-    setTextureImage(tex);
-    return () => {
-      tex.dispose();
-    };
-    // We only care about the texture identity, not the record reference —
-    // a parent re-render that hands us the same record by value should
-    // not retrigger a fetch/dispose cycle.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [textureRecordId]);
-
-  // A flat unlit-feeling material so admins read the texture's true colour
-  // rather than the studio lighting. Emissive cyan on selection is kept
-  // subtle — the edge outline does most of the "this is selected" work.
-  const baseColor = selected ? "#00e5ff" : "#c97a48";
-
-  // Drop-hover wins over selection for emissive feedback so the designer
-  // sees a strong "drop here" cue even on the already-selected marker.
-  const emissiveColor = dropHovered
-    ? "#34d399"
-    : selected
-      ? "#00e5ff"
-      : "#000000";
-  const emissiveIntensity = dropHovered ? 0.7 : selected ? 0.35 : 0;
+  const isModel = textureRecord != null && textureKind(textureRecord) === "model";
 
   return (
     <group
+      ref={groupRef}
+      // Tag the marker group with the placement id so the wrapper's
+      // raycaster (which walks ancestors) resolves both box + glTF markers
+      // to a placement — the glTF clone's sub-meshes don't each carry the id.
+      userData={{ [PLACEMENT_ID_USERDATA_KEY]: placement.id }}
+      name={PLACEMENT_MESH_NAME}
       position={[position.x, position.y, position.z]}
-      scale={[Math.max(scale.x, 0.001), Math.max(scale.y, 0.001), Math.max(scale.z, 0.001)]}
+      scale={[
+        Math.max(scale.x, 0.001),
+        Math.max(scale.y, 0.001),
+        Math.max(scale.z, 0.001),
+      ]}
       onPointerDown={(e) => {
         // stopPropagation so a click on the front face doesn't also trigger
-        // the back face / OrbitControls' own pointer handler.
+        // the back face / OrbitControls' own pointer handler. We DON'T call
+        // onSelect here anymore — selection is driven by the wrapper's
+        // click-vs-drag arbitration (see CanvasPlacementScene) so an orbit
+        // drag that happens to start on a marker doesn't select it.
         e.stopPropagation();
-        onSelect(placement.id);
       }}
     >
-      <mesh
-        castShadow
-        receiveShadow
-        // Tag the mesh so the drag-and-drop raycaster (in DragDropOverlay)
-        // can filter only on placement markers, ignoring the floor / glTF.
-        name={PLACEMENT_MESH_NAME}
-        userData={{ [PLACEMENT_ID_USERDATA_KEY]: placement.id }}
-      >
-        <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial
-          color={textureImage ? "#ffffff" : baseColor}
-          map={textureImage}
-          emissive={emissiveColor}
-          emissiveIntensity={emissiveIntensity}
-          side={DoubleSide}
-          metalness={0.05}
-          roughness={0.9}
+      {isModel && textureRecord ? (
+        <PlacementGlbTexture
+          texture={textureRecord}
+          selected={selected}
+          dimmed={dimmed}
         />
-      </mesh>
+      ) : (
+        <PlacementImageMarker
+          texture={textureRecord}
+          selected={selected}
+          dropHovered={dropHovered}
+          dimmed={dimmed}
+        />
+      )}
 
       {(selected || dropHovered) && (
         <PlacementOutline color={dropHovered ? "#34d399" : "#00e5ff"} />
@@ -162,6 +156,160 @@ function PlacementMarker({
 }
 
 /**
+ * 2D-image (or empty) placement marker: a unit cube whose front face shows
+ * the texture. The cube is the raycaster's hit target (named so the wrapper
+ * can filter to markers only).
+ */
+function PlacementImageMarker({
+  texture,
+  selected,
+  dropHovered,
+  dimmed,
+}: {
+  texture: TextureRecord | null;
+  selected: boolean;
+  dropHovered: boolean;
+  dimmed: boolean;
+}) {
+  // Lazy-load the texture image as a Three texture. We don't use drei's
+  // `useTexture` because (a) the URL might be missing (placement with no
+  // texture yet) and (b) we want a graceful fallback to a flat colour, not
+  // a Suspense throw that crashes the canvas.
+  //
+  // Lifecycle: every time the texture record id changes we load a fresh
+  // ThreeTexture and dispose the previous one on cleanup — else the GPU
+  // leaks one texture per selection switch.
+  const textureRecordId = texture?.id ?? null;
+  const [textureImage, setTextureImage] = useState<ThreeTexture | null>(null);
+  useEffect(() => {
+    if (!texture) {
+      setTextureImage(null);
+      return;
+    }
+    const tex = TEXTURE_LOADER.load(textureUrl(texture));
+    tex.flipY = false;
+    setTextureImage(tex);
+    return () => {
+      tex.dispose();
+    };
+    // Identity-only dep: a parent re-render handing the same record by value
+    // should not retrigger a fetch/dispose cycle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textureRecordId]);
+
+  const baseColor = selected ? "#00e5ff" : "#c97a48";
+  const emissiveColor = dropHovered
+    ? "#34d399"
+    : selected
+      ? "#00e5ff"
+      : "#000000";
+  const emissiveIntensity = dropHovered ? 0.7 : selected ? 0.35 : 0;
+
+  return (
+    <mesh castShadow receiveShadow name={PLACEMENT_MESH_NAME}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial
+        color={textureImage ? "#ffffff" : baseColor}
+        map={textureImage}
+        emissive={emissiveColor}
+        emissiveIntensity={emissiveIntensity}
+        side={DoubleSide}
+        metalness={0.05}
+        roughness={0.9}
+        transparent={dimmed}
+        opacity={dimmed ? 0.3 : 1}
+        depthWrite={!dimmed}
+      />
+    </mesh>
+  );
+}
+
+/**
+ * glTF ("model"-kind) placement marker. Loads the texture's binary as a
+ * glTF and renders a deep-clone of it at the placement transform. The
+ * clone's meshes are renamed to {@link PLACEMENT_MESH_NAME} so the
+ * drag-and-drop + selection raycaster treats the whole model as one hit
+ * target, and tagged with the placement id via userData so picks resolve.
+ *
+ * Selection / dim feedback is applied by walking the clone's materials
+ * (emissive tint on select, opacity on dim) — we can't tint via props the
+ * way the box marker does because the model brings its own materials.
+ */
+function PlacementGlbTexture({
+  texture,
+  selected,
+  dimmed,
+}: {
+  texture: TextureRecord;
+  selected: boolean;
+  dimmed: boolean;
+}) {
+  const gltf = useGLTF(textureUrl(texture)) as GLTF;
+
+  const scene = useMemo<Object3D>(() => {
+    const cloned = gltf.scene.clone(true);
+    cloned.traverse((node) => {
+      const mesh = node as Mesh & { isMesh?: boolean };
+      if (!mesh.isMesh) return;
+      mesh.geometry = mesh.geometry.clone();
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map((m) => m.clone())
+        : mesh.material.clone();
+      // Name each sub-mesh so the raycaster's name path matches; the
+      // placement id lives on the marker group (set by PlacementMarker).
+      mesh.name = PLACEMENT_MESH_NAME;
+    });
+    return cloned;
+    // gltf.scene identity is stable per URL via the drei cache.
+  }, [gltf.scene]);
+
+  // Apply selection emissive + dim opacity by walking the clone's
+  // materials. Re-runs on selection / dim flips.
+  useEffect(() => {
+    scene.traverse((node) => {
+      const mesh = node as Mesh & { isMesh?: boolean };
+      if (!mesh.isMesh) return;
+      const apply = (m: MeshStandardMaterial) => {
+        if (m.emissive) {
+          m.emissive.set(selected ? "#00e5ff" : "#000000");
+          m.emissiveIntensity = selected ? 0.25 : 0;
+        }
+        m.transparent = dimmed;
+        m.opacity = dimmed ? 0.3 : 1;
+        m.depthWrite = !dimmed;
+        m.needsUpdate = true;
+      };
+      const mat = mesh.material as
+        | MeshStandardMaterial
+        | MeshStandardMaterial[];
+      if (Array.isArray(mat)) mat.forEach(apply);
+      else apply(mat);
+    });
+  }, [scene, selected, dimmed]);
+
+  // Dispose the per-mount geometry + cloned materials on unmount. Textures
+  // belong to drei's useGLTF cache.
+  const sceneRef = useRef(scene);
+  sceneRef.current = scene;
+  useEffect(() => {
+    return () => {
+      sceneRef.current.traverse((node) => {
+        const mesh = node as Mesh & { isMesh?: boolean };
+        if (!mesh.isMesh) return;
+        mesh.geometry?.dispose();
+        const mat = mesh.material as
+          | MeshStandardMaterial
+          | MeshStandardMaterial[];
+        if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+        else mat.dispose();
+      });
+    };
+  }, []);
+
+  return <primitive object={scene} />;
+}
+
+/**
  * Cyan wireframe outline drawn around the unit-cube placement marker. We
  * build it by hand (rather than `<Edges>` from drei) so the line material
  * stays opaque on top of the textured face — `<Edges>` overlays as a
@@ -173,8 +321,6 @@ function PlacementOutline({ color = "#00e5ff" }: { color?: string }) {
     const mat = new LineBasicMaterial({ color });
     return new LineSegments(geom, mat);
   }, [color]);
-  // Dispose handcrafted GPU resources on unmount (ArtworkModel sets the
-  // precedent for treating per-mount three resources as ours to dispose).
   useEffect(() => {
     return () => {
       lines.geometry.dispose();
@@ -189,11 +335,9 @@ const STUDIO_FLOOR_NAME = "tcsh-studio-floor";
 
 /**
  * Lazily build the 1024×1024 floor texture exactly once per page session.
- * Promoting it to a module-level singleton means every C5 entry/exit pair
- * reuses the same GPU texture — no per-mount CanvasTexture leak, no
- * regen cost on remount. Lazy because the module may load in a context
- * where `document` isn't available (tests, SSR), and we'd rather no-op
- * than crash importing.
+ * Module-level singleton so every C5 entry/exit reuses the same GPU texture
+ * — no per-mount CanvasTexture leak, no regen cost on remount. Lazy because
+ * the module may load where `document` isn't available (tests, SSR).
  */
 let cachedStudioFloorTexture: CanvasTexture | null = null;
 function getStudioFloorTexture(): CanvasTexture | null {
@@ -223,11 +367,9 @@ function getStudioFloorTexture(): CanvasTexture | null {
 }
 
 /**
- * Floor grid drawn beneath the artwork — gives admins a sense of scale
- * when the artwork glTF hasn't loaded yet (or when we're previewing in a
- * test build with no model). The 1024×1024 CanvasTexture is built once
- * at module level (`getStudioFloorTexture`), so admin in/out of C5
- * doesn't accumulate GPU resources.
+ * Floor grid drawn beneath the artwork — gives admins a sense of scale.
+ * The 1024×1024 CanvasTexture is built once at module level, so admin
+ * in/out of C5 doesn't accumulate GPU resources.
  */
 function StudioFloor() {
   const texture = useMemo(() => getStudioFloorTexture(), []);
@@ -250,10 +392,9 @@ function StudioFloor() {
 }
 
 /**
- * Camera initialiser — positions the orbit camera the first time the
- * scene mounts so the artwork plus markers fit in the 920×664 viewport.
- * After that we hand control to OrbitControls; we don't want to fight
- * the user's drags on every render.
+ * Camera initialiser — positions the orbit camera the first time the scene
+ * mounts so the artwork plus markers fit in the viewport. After that we
+ * hand control to OrbitControls; we don't want to fight the user's drags.
  */
 function CameraSetup() {
   const camera = useThree((s) => s.camera);
@@ -279,75 +420,96 @@ export type CanvasPlacementSceneProps = {
   placements: Placement[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  /** Live overrides for the currently selected placement, mirroring the
-   *  side-panel form so canvas + form stay in lockstep while the form is
-   *  dirty. */
+  /** Called when the canvas detects a click on empty space (deselect). */
+  onDeselect?: () => void;
+  /** Live position override for the selected placement, mirroring the
+   *  side-panel form + gizmo drag so canvas + form stay in lockstep. */
   selectedOverride?: PlacementMarkerProps["override"];
-  /** Resolved texture record for the selected placement (so the marker can
-   *  show the live texture pick instead of the saved one). */
+  /** Resolved texture record for the selected placement. */
   selectedTexture?: TextureRecord | null;
-  /** Fired when a texture is dropped on a placement marker. The callback
-   *  owns the form state + persistence (auto-save in C5). Empty space drops
-   *  are no-ops; this fires only on a successful raycaster hit. */
+  /** Texture lookup by placement id, so every marker (preview mode) can show
+   *  its own saved texture, not just the selected one. */
+  textureForPlacement?: (placement: Placement) => TextureRecord | null;
+  /** Fired when a texture is dropped on a placement marker. */
   onTextureDrop?: (placementId: string, textureId: string) => void;
-  /** Optional className for sizing — the editor sets `h-[664px] w-[920px]`. */
+  /** View mode: isolation (frame + selected only) vs preview (all is_show). */
+  viewMode: CanvasViewMode;
+  /** Fired by the gizmo on each translate change — live position in world
+   *  space. The screen feeds this back into the form. */
+  onGizmoMove?: (position: Vec3) => void;
+  /** Fired by Cmd/Meta + wheel over the canvas — a multiplicative scale
+   *  delta (e.g. 1.05 / 0.95) for the selected placement. */
+  onScaleDelta?: (factor: number) => void;
+  /** Optional className for sizing. */
   className?: string;
-  /** Slot rendered above the R3F canvas (still inside the relative wrapper)
-   *  so floating overlays like the texture palette can sit on top of the
-   *  3D view without the canvas swallowing pointer events. */
+  /** Slot rendered above the R3F canvas (texture palette etc.). */
   overlay?: React.ReactNode;
 };
 
 /**
  * Snapshot of the live R3F scene refs (camera + scene root) lifted out of
- * `<Canvas>` so the outer drop handler can run a Three Raycaster against
- * them. We can't read these from inside the Canvas children at drop time
- * because dragover/drop events fire on the wrapping <div>, not on the R3F
- * event system (which only proxies pointer events).
+ * `<Canvas>` so the outer pointer / drop handlers can raycast against them.
  */
 type SceneRefs = { camera: Camera; scene: Object3D } | null;
 
+
 /**
- * The 920×664 R3F canvas at the heart of C5. Renders the artwork as a
- * faded backdrop, then a cube per placement (sized + positioned by its
- * `transform`). Click a cube → the parent updates `selectedId` and the
- * sidebar form fills in. Form edits flow back via `selectedOverride` so
- * the live cube tracks the form before save.
+ * The R3F canvas at the heart of C5. Renders the iron frame (isolation) or
+ * the textured artwork backdrop (preview) plus a marker per visible
+ * placement. Interaction is Blender-style:
  *
- * The outer wrapping `<div>` doubles as the HTML5 drop target — a designer
- * can drag a texture out of `TexturePalette` (or the sidebar's 80×80
- * thumb) and drop it directly on a marker. We do raycasting in the wrapper
- * (HTML world) rather than via R3F pointer events because the drag
- * lifecycle's `dragover` / `drop` are HTML5 native events and don't reach
- * the R3F event system.
+ *  - Nothing selected → drag orbits (OrbitControls).
+ *  - pointerdown/up with < 6px move & < 300ms → click: raycast to
+ *    select / deselect. ≥ 6px → drag: orbit, we stay out of the way.
+ *  - Selected → an xyz gizmo (TransformControls, translate) appears;
+ *    dragging it moves the placement (drei auto-pauses orbit while
+ *    dragging the gizmo).
+ *  - Cmd/Meta + wheel → scale the selected placement.
+ *  - Hold Ctrl → temporarily re-enable orbit even while a placement is
+ *    selected (turn the view mid-edit); release restores edit mode.
+ *  - Esc / click empty → deselect.
+ *
+ * The wrapping `<div>` doubles as the HTML5 drop target for texture
+ * drag-and-drop (raycast in HTML space because drag events don't reach the
+ * R3F event system).
  */
 export function CanvasPlacementScene({
   placements,
   selectedId,
   onSelect,
+  onDeselect,
   selectedOverride,
   selectedTexture,
+  textureForPlacement,
   onTextureDrop,
+  viewMode,
+  onGizmoMove,
+  onScaleDelta,
   className,
   overlay,
 }: CanvasPlacementSceneProps) {
   useEffect(() => {
-    // Same pattern as B2Viewer — keep the ~10 MB glTF preload off the
-    // module top level so importing this file doesn't blow up bundles
-    // that don't actually mount the editor.
+    // Keep the ~10 MB glTF preloads off the module top level. Isolation
+    // needs the iron frame; preview leans on the textured artwork backdrop.
     queueArtworkPreload();
+    queueIronFramePreload();
   }, []);
 
-  // The drop wrapper needs DOM access to compute NDC coordinates from the
-  // pointer position. Held alongside live R3F scene refs harvested from
-  // inside the Canvas.
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const sceneRefsRef = useRef<SceneRefs>(null);
   const raycasterRef = useRef<Raycaster | null>(null);
   const ndcRef = useRef<Vector2 | null>(null);
+  // The selected marker's group, handed to TransformControls. Held in state
+  // (not a ref) so attaching the gizmo re-renders once the group mounts.
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  // True while the Ctrl key is held — flips the canvas back to orbit even
+  // with a placement selected.
+  const [ctrlOrbit, setCtrlOrbit] = useState(false);
+  // Set true on TransformControls mousedown, cleared shortly after mouseup.
+  // The wrapper's click-vs-drag arbitration reads it to avoid treating a
+  // gizmo interaction as an "empty click" that would deselect.
+  const gizmoActiveRef = useRef(false);
 
-  // Lazy-init Three helpers so the module import stays cheap. The Raycaster
-  // and Vector2 are reused across drag events (no per-frame allocation).
   function getRaycaster(): Raycaster {
     if (!raycasterRef.current) raycasterRef.current = new Raycaster();
     return raycasterRef.current;
@@ -357,15 +519,10 @@ export function CanvasPlacementScene({
     return ndcRef.current;
   }
 
-  // The id of the placement currently being hovered during a drag, used to
-  // light up the right marker. Reset on dragleave + drop.
   const [dropHoverId, setDropHoverId] = useState<string | null>(null);
 
-  /**
-   * Run a raycast against the marker meshes for a given pointer event and
-   * return the topmost placement id. Returns `null` if the cursor is over
-   * empty space, the artwork, or the floor — drops there should no-op.
-   */
+  /** Raycast against marker meshes and return the topmost placement id, or
+   *  null over empty space / the frame / floor. */
   const pickPlacementAt = useCallback(
     (clientX: number, clientY: number): string | null => {
       const wrapper = wrapperRef.current;
@@ -373,33 +530,119 @@ export function CanvasPlacementScene({
       if (!wrapper || !refs) return null;
 
       const rect = wrapper.getBoundingClientRect();
-      // NDC: x in [-1, 1] left→right, y in [-1, 1] bottom→top.
       const ndc = getNdc();
       ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       ndc.y = -(((clientY - rect.top) / rect.height) * 2 - 1);
-      // If the pointer escaped the wrapper between events, bail.
       if (ndc.x < -1 || ndc.x > 1 || ndc.y < -1 || ndc.y > 1) return null;
 
       const raycaster = getRaycaster();
       raycaster.setFromCamera(ndc, refs.camera);
       const intersects = raycaster.intersectObjects(refs.scene.children, true);
-      // Filter to placement-marker meshes and pick the closest. The list is
-      // already sorted by distance, so the first match wins.
       for (const hit of intersects) {
-        const obj = hit.object as Mesh;
-        if (obj.name !== PLACEMENT_MESH_NAME) continue;
-        const id = obj.userData?.[PLACEMENT_ID_USERDATA_KEY];
-        if (typeof id === "string") return id;
+        // Only consider marker-tagged meshes (skip frame / floor / artwork),
+        // then walk up to the marker group that carries the placement id.
+        if (hit.object.name !== PLACEMENT_MESH_NAME) continue;
+        let obj: Object3D | null = hit.object;
+        while (obj) {
+          const id = obj.userData?.[PLACEMENT_ID_USERDATA_KEY];
+          if (typeof id === "string") return id;
+          obj = obj.parent;
+        }
       }
       return null;
     },
     [],
   );
 
+  // ── Click vs drag arbitration ───────────────────────────────────────
+  // Record the pointerdown origin; on pointerup decide click vs drag by
+  // displacement + elapsed time. A click raycasts to select / deselect; a
+  // drag was an orbit gesture OrbitControls already serviced.
+  const downRef = useRef<{ x: number; y: number; t: number } | null>(null);
+
+  function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    // Only arbitrate primary-button presses; secondary / middle are
+    // pan / dolly gestures owned entirely by OrbitControls.
+    if (e.button !== 0) {
+      downRef.current = null;
+      return;
+    }
+    downRef.current = { x: e.clientX, y: e.clientY, t: performance.now() };
+  }
+
+  function handlePointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    const down = downRef.current;
+    downRef.current = null;
+    if (!down || e.button !== 0) return;
+    // A gizmo interaction (drag or click on the handles) is not a canvas
+    // click — bail so the deselect branch doesn't fire and kick the admin
+    // out of edit mode while they're nudging the gizmo.
+    if (gizmoActiveRef.current) return;
+    const dx = e.clientX - down.x;
+    const dy = e.clientY - down.y;
+    const moved = Math.hypot(dx, dy);
+    const elapsed = performance.now() - down.t;
+    // Drag → orbit already handled it; stay out of the way.
+    if (classifyPointerGesture(moved, elapsed) === "drag") return;
+    // Click → select the hit placement, or deselect on empty space.
+    const hitId = pickPlacementAt(e.clientX, e.clientY);
+    if (hitId) {
+      if (hitId !== selectedId) onSelect(hitId);
+    } else {
+      onDeselect?.();
+    }
+  }
+
+  // ── Ctrl-orbit + Esc-deselect key handling ──────────────────────────
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Control") {
+        setCtrlOrbit(true);
+        return;
+      }
+      if (e.key === "Escape" && selectedId) {
+        onDeselect?.();
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Control") setCtrlOrbit(false);
+    };
+    // Reset on blur so a Ctrl held across a focus loss doesn't stick.
+    const onBlur = () => setCtrlOrbit(false);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [selectedId, onDeselect]);
+
+  // ── Cmd/Meta + wheel → scale ────────────────────────────────────────
+  // Attached natively (not via React's onWheel) so we can call
+  // preventDefault with passive:false and stop the browser zoom / page
+  // scroll. Only fires when a placement is selected and Meta is held.
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!selectedId || !(e.metaKey || e.ctrlKey)) return;
+      // Ctrl is our orbit modifier; only Meta (Cmd) scales — but on
+      // non-mac the pinch-zoom gesture surfaces as ctrlKey+wheel, so we
+      // accept ctrl too *when it's a wheel with deltaY* and no orbit drag
+      // is in flight. Keep it simple: Meta on mac, Ctrl elsewhere.
+      e.preventDefault();
+      // Normalise direction: wheel up (deltaY < 0) grows, down shrinks.
+      const factor = e.deltaY < 0 ? 1.05 : 0.95;
+      onScaleDelta?.(factor);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [selectedId, onScaleDelta]);
+
+  // ── Drag-and-drop (texture assignment) ──────────────────────────────
   function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
-    // Without a preventDefault on dragover the browser refuses to fire a
-    // subsequent drop. We only opt in when a texture is being dragged so
-    // unrelated drags (e.g. files into the page) keep their default UI.
     if (!isTextureDrag(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
@@ -408,8 +651,6 @@ export function CanvasPlacementScene({
   }
 
   function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
-    // Browsers fire dragleave on every child boundary; only clear when the
-    // cursor truly left the wrapper.
     const next = e.relatedTarget as Node | null;
     if (next && wrapperRef.current?.contains(next)) return;
     setDropHoverId(null);
@@ -426,10 +667,28 @@ export function CanvasPlacementScene({
     onTextureDrop(hitId, textureId);
   }
 
+  // ── Which placements to render ──────────────────────────────────────
+  // Isolation: only the selected one. Preview: every placement, with
+  // is_show === false drawn dimmed.
+  const visiblePlacements = useMemo(() => {
+    if (viewMode === "isolation") {
+      return placements.filter((p) => p.id === selectedId);
+    }
+    return placements;
+  }, [placements, selectedId, viewMode]);
+
+  // Gizmo is active only in isolation (edit) mode, when a placement is
+  // selected, the editor isn't in Ctrl-orbit mode, and the selected
+  // marker's group has mounted. Preview mode is read-only — no gizmo.
+  const gizmoActive =
+    viewMode === "isolation" && !!selectedId && !!selectedGroup && !ctrlOrbit;
+
   return (
     <div
       ref={wrapperRef}
       className={`relative ${className ?? ""}`}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -450,36 +709,71 @@ export function CanvasPlacementScene({
           <SceneRefBridge sceneRefsRef={sceneRefsRef} />
 
           <Suspense fallback={null}>
-            <group>
-              <ArtworkModelDimmed />
-            </group>
+            {viewMode === "isolation" ? (
+              // Isolation: the bare iron frame, opaque, as the focus backdrop.
+              <IronFrameModel opacity={1} />
+            ) : (
+              // Preview: the textured artwork dimmed so markers read on top.
+              <group>
+                <ArtworkModelDimmed />
+              </group>
+            )}
           </Suspense>
 
           <StudioFloor />
 
-          {placements.map((p) => {
+          {visiblePlacements.map((p) => {
             const isSelected = p.id === selectedId;
+            const dimmed = viewMode === "preview" && p.is_show === false;
+            const savedTexture = textureForPlacement?.(p) ?? null;
             return (
               <PlacementMarker
                 key={p.id}
                 placement={p}
                 selected={isSelected}
                 dropHovered={p.id === dropHoverId}
-                onSelect={onSelect}
+                dimmed={dimmed}
+                groupRef={isSelected ? setSelectedGroup : undefined}
                 override={
                   isSelected
                     ? {
                         ...selectedOverride,
                         texture: selectedTexture ?? undefined,
                       }
-                    : undefined
+                    : { texture: savedTexture ?? undefined }
                 }
               />
             );
           })}
 
+          {gizmoActive && selectedGroup && (
+            <TransformControls
+              object={selectedGroup}
+              mode="translate"
+              onMouseDown={() => {
+                gizmoActiveRef.current = true;
+              }}
+              onMouseUp={() => {
+                // Clear after the current event loop tick so the wrapper's
+                // pointerup (which fires after the gizmo's) still sees the
+                // guard and skips the deselect branch.
+                window.setTimeout(() => {
+                  gizmoActiveRef.current = false;
+                }, 0);
+              }}
+              onObjectChange={() => {
+                const p = selectedGroup.position;
+                onGizmoMove?.({ x: p.x, y: p.y, z: p.z });
+              }}
+            />
+          )}
+
           <OrbitControls
             makeDefault
+            // Orbit is the default gesture except in isolation edit mode
+            // where the gizmo owns the drag — there it re-enables only when
+            // nothing's selected OR Ctrl is held. Preview is always orbit.
+            enabled={viewMode === "preview" || !selectedId || ctrlOrbit}
             enableDamping
             dampingFactor={0.08}
             minDistance={1}
@@ -492,12 +786,8 @@ export function CanvasPlacementScene({
   );
 }
 
-/** Returns true if the dragged payload is one of our texture drags — keeps
- *  unrelated drags (browser file drops, text selections) from triggering
- *  the drop visual or stealing default UI. */
+/** True if the dragged payload is one of our texture drags. */
 function isTextureDrag(e: React.DragEvent<HTMLElement>): boolean {
-  // `types` is a DOMStringList in some browsers; iteration is safer than
-  // contains() which Safari/Firefox have shipped at different times.
   for (const t of e.dataTransfer.types) {
     if (t === TEXTURE_DRAG_MIME) return true;
   }
@@ -506,8 +796,8 @@ function isTextureDrag(e: React.DragEvent<HTMLElement>): boolean {
 
 /**
  * Tiny child of `<Canvas>` whose only job is to copy the live camera +
- * scene refs into a parent ref so the wrapping `<div>`'s drop handlers can
- * run a raycaster outside the R3F event system.
+ * scene refs into a parent ref so the wrapping `<div>`'s pointer / drop
+ * handlers can run a raycaster outside the R3F event system.
  */
 function SceneRefBridge({
   sceneRefsRef,
@@ -526,20 +816,12 @@ function SceneRefBridge({
 }
 
 /**
- * Wraps `ArtworkModel` with a translucent override material so the
- * artwork reads as scaffolding behind the placement cubes rather than
- * fighting them for attention. The model component already deep-clones
- * its meshes, so adjusting `material.opacity` here doesn't bleed back to
- * other Mode B / Mode A mounts that share the drei cache.
- *
- * If `ArtworkModel`'s fitting effect re-runs and re-frames the camera we
- * counter it inside CameraSetup; the user's orbit state stays put because
- * we only set the camera once on mount.
+ * Wraps `ArtworkModel` with a translucent override material so the textured
+ * artwork reads as scaffolding behind the placement markers in preview
+ * mode. The model component deep-clones its meshes, so adjusting opacity
+ * here doesn't bleed back to other Mode B / Mode A mounts.
  */
 function ArtworkModelDimmed() {
-  // Wrap in a try-friendly Suspense fallback by rendering null when the
-  // glTF errors — ModelErrorBoundary above catches the throw, so the rest
-  // of the editor (markers, controls) keeps working.
   return (
     <group renderOrder={-1}>
       <ArtworkModel framing={2.4} />
@@ -549,29 +831,21 @@ function ArtworkModelDimmed() {
 }
 
 /**
- * Wraps the artwork's children in a translucent grey on the next frame.
- * We can't reach into ArtworkModel's cloned scene from props, so we walk
- * `useThree(s => s.scene)` once after mount and tweak materials in place.
+ * Dims the artwork's meshes on the next frame. We can't reach into
+ * ArtworkModel's cloned scene from props, so we walk the scene once after
+ * mount and tweak materials in place — skipping the markers + floor by name.
  */
 function DimmingPass() {
   const scene = useThree((s) => s.scene);
   useEffect(() => {
-    // Defer to next frame so ArtworkModel's recentre layout effect has
-    // populated the cloned subtree before we walk it.
     const id = window.requestAnimationFrame(() => {
       scene.traverse((node) => {
-        // Match the Mesh check ArtworkModel uses; we look at `isMesh` to
-        // avoid importing the Three Mesh class twice for a runtime check.
         if (!(node as { isMesh?: boolean }).isMesh) return;
-        // Explicitly skip the placement marker cubes and the studio floor
-        // — without this filter the traverse order would silently decide
-        // which meshes get dimmed (the original code relied on the marker
-        // mounting *after* this rAF, which is fragile against Suspense /
-        // render-order changes). Names are owned by this module so future
-        // additions stay opt-out by default.
         if (node.name === PLACEMENT_MESH_NAME) return;
         if (node.name === STUDIO_FLOOR_NAME) return;
-        const mesh = node as unknown as { material: MeshStandardMaterial | MeshStandardMaterial[] };
+        const mesh = node as unknown as {
+          material: MeshStandardMaterial | MeshStandardMaterial[];
+        };
         const apply = (m: MeshStandardMaterial) => {
           m.transparent = true;
           m.opacity = 0.35;

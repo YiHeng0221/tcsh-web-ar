@@ -6,27 +6,37 @@
  * service). The shape below mirrors what `GET /textures` and
  * `POST /textures` return.
  *
- * TODO(openapi-regen): the API hasn't published a `TextureOut` schema in
- * the generated OpenAPI yet, so this file hand-rolls the type. Once
- * `apps/web/scripts/gen-types.sh` produces `components.schemas.TextureOut`,
- * delete this declaration and re-export from `@/lib/api`. Hand-written
- * duplicates of OpenAPI types violate the `Pydantic is the source of
- * truth` rule from CLAUDE.md, so this must be tracked, not forgotten.
+ * The backend now publishes a `TextureOut` schema in the generated
+ * OpenAPI, so we narrow this alias to it (re-homing the type satisfies the
+ * `Pydantic is the source of truth` rule from CLAUDE.md). We keep the
+ * `Texture` name + a tolerant `label` so the existing C3/C4 call-sites that
+ * read `texture.label ?? …` don't have to change.
+ *
+ * `kind` is the render-path discriminator: "model" → place the glTF binary
+ * as-is, "image" → draw the bytes on a 2D quad. The backend derives it from
+ * the mime type so the client never sniffs bytes.
  */
-export type Texture = {
-  id: string;
-  /** Optional human-friendly label set by the admin during upload. */
+import type { components } from "@/lib/api";
+
+type TextureOut = components["schemas"]["TextureOut"];
+
+export type TextureKind = "image" | "model";
+
+export type Texture = Omit<TextureOut, "label" | "kind"> & {
+  /** Human-friendly label set by the admin during upload. The API always
+   *  sends a string, but older mock fixtures may omit it — keep it
+   *  tolerant so `texture.label ?? texture.filename` stays sound. */
   label?: string | null;
-  /** Original filename from the upload. */
-  filename: string;
-  mime_type: string;
-  size_bytes: number;
-  /** API-relative URL for the binary, e.g. "/textures/abc123/file". The
-   *  frontend prepends `VITE_API_BASE_URL` via {@link textureUrl}. */
-  file_url: string;
-  created_at: string;
-  updated_at: string;
+  /** Render-path discriminator: image (2D quad) vs model (glTF placed
+   *  as-is). Backend-derived from the mime type. */
+  kind: TextureKind;
 };
+
+/** Narrow the backend's `kind: string` to the client union. Anything the
+ *  backend doesn't explicitly mark as a model is treated as an image. */
+export function textureKind(texture: Pick<Texture, "kind">): TextureKind {
+  return texture.kind === "model" ? "model" : "image";
+}
 
 interface ViteEnv {
   readonly VITE_API_BASE_URL?: string;

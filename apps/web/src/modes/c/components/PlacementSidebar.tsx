@@ -135,6 +135,14 @@ type Props = {
   pristine: PlacementFormValues;
   anchors: Anchor[];
   textures: Texture[];
+  /** Server-side visibility flag (`is_show`). Lives on the placement record,
+   *  not the form, because it persists immediately on toggle (no 儲存 step)
+   *  — it's a publish switch, not a draft edit. */
+  isShow: boolean;
+  /** Toggle handler for `is_show`. PATCHes immediately + optimistically. */
+  onToggleShow: (next: boolean) => void;
+  /** True while the visibility PATCH is in flight (disable the checkbox). */
+  isShowPending?: boolean;
   onChange: (next: PlacementFormValues) => void;
   /**
    * Called when the admin clicks 更換. Hooks into the C3 texture-library
@@ -156,6 +164,9 @@ export function PlacementSidebar({
   pristine,
   anchors,
   textures,
+  isShow,
+  onToggleShow,
+  isShowPending,
   onChange,
   onChangeTexture,
 }: Props) {
@@ -210,6 +221,25 @@ export function PlacementSidebar({
           </span>
         )}
       </header>
+
+      <label
+        data-testid="placement-is-show"
+        className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg"
+      >
+        <input
+          type="checkbox"
+          checked={isShow}
+          disabled={isShowPending}
+          onChange={(e) => onToggleShow(e.target.checked)}
+          className="h-4 w-4 accent-accent disabled:opacity-50"
+        />
+        <span>於預覽 / AR 顯示</span>
+        {isShowPending && (
+          <span className="text-[11px] text-muted" aria-live="polite">
+            更新中…
+          </span>
+        )}
+      </label>
 
       <FieldRow>
         <FieldLabel htmlFor={idForId}>ID</FieldLabel>

@@ -21,118 +21,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/anchors": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Anchors */
-        get: operations["list_anchors_api_anchors_get"];
-        put?: never;
-        /** Create Anchor */
-        post: operations["create_anchor_api_anchors_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/anchors/{anchor_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Anchor */
-        get: operations["get_anchor_api_anchors__anchor_id__get"];
-        put?: never;
-        post?: never;
-        /** Delete Anchor */
-        delete: operations["delete_anchor_api_anchors__anchor_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Anchor */
-        patch: operations["update_anchor_api_anchors__anchor_id__patch"];
-        trace?: never;
-    };
-    "/api/objects": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Objects */
-        get: operations["list_objects_api_objects_get"];
-        put?: never;
-        /** Create Object */
-        post: operations["create_object_api_objects_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/objects/{object_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Object */
-        get: operations["get_object_api_objects__object_id__get"];
-        put?: never;
-        post?: never;
-        /** Delete Object */
-        delete: operations["delete_object_api_objects__object_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Object */
-        patch: operations["update_object_api_objects__object_id__patch"];
-        trace?: never;
-    };
-    "/api/placements": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Placements */
-        get: operations["list_placements_api_placements_get"];
-        put?: never;
-        /** Create Placement */
-        post: operations["create_placement_api_placements_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/placements/{placement_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Placement */
-        get: operations["get_placement_api_placements__placement_id__get"];
-        put?: never;
-        post?: never;
-        /** Delete Placement */
-        delete: operations["delete_placement_api_placements__placement_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Placement */
-        patch: operations["update_placement_api_placements__placement_id__patch"];
-        trace?: never;
-    };
-    "/api/textures/upload-url": {
+    "/auth/login": {
         parameters: {
             query?: never;
             header?: never;
@@ -141,8 +30,196 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Upload Url */
-        post: operations["create_upload_url_api_textures_upload_url_post"];
+        /**
+         * Login
+         * @description Single-admin login. Compare email + password against env-configured
+         *     values and mint an HS256 JWT.
+         *
+         *     Returns the spec-shaped 401 ({"detail": "Invalid credentials"}) on any
+         *     mismatch — never leaks which of the two fields was wrong.
+         */
+        post: operations["login_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Me */
+        get: operations["me_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/anchors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Anchors */
+        get: operations["list_anchors_anchors_get"];
+        put?: never;
+        /** Create Anchor */
+        post: operations["create_anchor_anchors_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/anchors/{anchor_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Anchor */
+        get: operations["get_anchor_anchors__anchor_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Anchor */
+        delete: operations["delete_anchor_anchors__anchor_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Anchor */
+        patch: operations["update_anchor_anchors__anchor_id__patch"];
+        trace?: never;
+    };
+    "/objects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Objects */
+        get: operations["list_objects_objects_get"];
+        put?: never;
+        /** Create Object */
+        post: operations["create_object_objects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/objects/{object_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Object */
+        get: operations["get_object_objects__object_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Object */
+        delete: operations["delete_object_objects__object_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Object */
+        patch: operations["update_object_objects__object_id__patch"];
+        trace?: never;
+    };
+    "/placements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Placements */
+        get: operations["list_placements_placements_get"];
+        put?: never;
+        /** Create Placement */
+        post: operations["create_placement_placements_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/placements/{placement_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Placement */
+        get: operations["get_placement_placements__placement_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Placement */
+        delete: operations["delete_placement_placements__placement_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Placement */
+        patch: operations["update_placement_placements__placement_id__patch"];
+        trace?: never;
+    };
+    "/textures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Textures */
+        get: operations["list_textures_textures_get"];
+        put?: never;
+        /** Upload Texture */
+        post: operations["upload_texture_textures_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/textures/{texture_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Texture */
+        get: operations["get_texture_textures__texture_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Texture */
+        delete: operations["delete_texture_textures__texture_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/textures/{texture_id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Texture File */
+        get: operations["get_texture_file_textures__texture_id__file_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -228,6 +305,16 @@ export interface components {
             size_mm?: number | null;
             world_pos?: components["schemas"]["WorldPose"] | null;
         };
+        /** Body_upload_texture_textures_post */
+        Body_upload_texture_textures_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+            /** Label */
+            label?: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -239,6 +326,26 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /**
+         * LoginRequest
+         * @description POST /auth/login body.
+         */
+        LoginRequest: {
+            /** Email */
+            email: string;
+            /** Password */
+            password: string;
+        };
+        /**
+         * MeResponse
+         * @description GET /auth/me response.
+         */
+        MeResponse: {
+            /** Email */
+            email: string;
+            /** Is Admin */
+            is_admin: boolean;
         };
         /** PlacementCreate */
         PlacementCreate: {
@@ -256,6 +363,11 @@ export interface components {
             texture_id?: string | null;
             transform: components["schemas"]["Transform"];
             uv_transform?: components["schemas"]["UVTransform"] | null;
+            /**
+             * Is Show
+             * @default true
+             */
+            is_show: boolean;
         };
         /** PlacementOut */
         PlacementOut: {
@@ -273,6 +385,11 @@ export interface components {
             texture_id?: string | null;
             transform: components["schemas"]["Transform"];
             uv_transform?: components["schemas"]["UVTransform"] | null;
+            /**
+             * Is Show
+             * @default true
+             */
+            is_show: boolean;
             /**
              * Id
              * Format: uuid
@@ -303,6 +420,8 @@ export interface components {
             texture_id?: string | null;
             transform?: components["schemas"]["Transform"] | null;
             uv_transform?: components["schemas"]["UVTransform"] | null;
+            /** Is Show */
+            is_show?: boolean | null;
         };
         /**
          * Quat
@@ -317,6 +436,63 @@ export interface components {
             z: number;
             /** W */
             w: number;
+        };
+        /**
+         * TextureOut
+         * @description Texture row as returned by the API.
+         *
+         *     `file_url` is a relative URL; the frontend prepends `VITE_API_BASE_URL`
+         *     before fetching. Computed from `id` so callers don't construct the
+         *     string themselves.
+         */
+        TextureOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /** Filename */
+            filename: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** File Url */
+            readonly file_url: string;
+            /**
+             * Kind
+             * @description Render-path discriminator for the client: a glTF binary is a 3D
+             *     model placed as-is; everything else is a 2D image drawn on a quad.
+             *     Derived from the mime type so the client never sniffs bytes.
+             */
+            readonly kind: string;
+        };
+        /**
+         * TokenResponse
+         * @description POST /auth/login 200 response.
+         */
+        TokenResponse: {
+            /** Access Token */
+            access_token: string;
+            /**
+             * Token Type
+             * @default bearer
+             */
+            token_type: string;
+            /** Expires In */
+            expires_in: number;
         };
         /**
          * Transform
@@ -366,26 +542,6 @@ export interface components {
              * @default 0
              */
             offset_y: number;
-        };
-        /** UploadURLRequest */
-        UploadURLRequest: {
-            /** Filename */
-            filename: string;
-            /** Mime */
-            mime: string;
-            /** Size Bytes */
-            size_bytes: number;
-        };
-        /** UploadURLResponse */
-        UploadURLResponse: {
-            /** Upload Url */
-            upload_url: string;
-            /** Storage Path */
-            storage_path: string;
-            /** Token */
-            token: string;
-            /** Expires At */
-            expires_at: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -453,7 +609,60 @@ export interface operations {
             };
         };
     };
-    list_anchors_api_anchors_get: {
+    login_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    me_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeResponse"];
+                };
+            };
+        };
+    };
+    list_anchors_anchors_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -473,7 +682,7 @@ export interface operations {
             };
         };
     };
-    create_anchor_api_anchors_post: {
+    create_anchor_anchors_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -506,7 +715,7 @@ export interface operations {
             };
         };
     };
-    get_anchor_api_anchors__anchor_id__get: {
+    get_anchor_anchors__anchor_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -537,7 +746,7 @@ export interface operations {
             };
         };
     };
-    delete_anchor_api_anchors__anchor_id__delete: {
+    delete_anchor_anchors__anchor_id__delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -566,7 +775,7 @@ export interface operations {
             };
         };
     };
-    update_anchor_api_anchors__anchor_id__patch: {
+    update_anchor_anchors__anchor_id__patch: {
         parameters: {
             query?: never;
             header?: never;
@@ -601,7 +810,7 @@ export interface operations {
             };
         };
     };
-    list_objects_api_objects_get: {
+    list_objects_objects_get: {
         parameters: {
             query?: {
                 /** @description Filter to objects placed at the given anchor. 404 if the anchor does not exist. */
@@ -633,7 +842,7 @@ export interface operations {
             };
         };
     };
-    create_object_api_objects_post: {
+    create_object_objects_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -666,7 +875,7 @@ export interface operations {
             };
         };
     };
-    get_object_api_objects__object_id__get: {
+    get_object_objects__object_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -697,7 +906,7 @@ export interface operations {
             };
         };
     };
-    delete_object_api_objects__object_id__delete: {
+    delete_object_objects__object_id__delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -726,7 +935,7 @@ export interface operations {
             };
         };
     };
-    update_object_api_objects__object_id__patch: {
+    update_object_objects__object_id__patch: {
         parameters: {
             query?: never;
             header?: never;
@@ -761,7 +970,7 @@ export interface operations {
             };
         };
     };
-    list_placements_api_placements_get: {
+    list_placements_placements_get: {
         parameters: {
             query?: {
                 /** @description Filter to placements at the given anchor */
@@ -793,7 +1002,7 @@ export interface operations {
             };
         };
     };
-    create_placement_api_placements_post: {
+    create_placement_placements_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -826,7 +1035,7 @@ export interface operations {
             };
         };
     };
-    get_placement_api_placements__placement_id__get: {
+    get_placement_placements__placement_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -857,7 +1066,7 @@ export interface operations {
             };
         };
     };
-    delete_placement_api_placements__placement_id__delete: {
+    delete_placement_placements__placement_id__delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -886,7 +1095,7 @@ export interface operations {
             };
         };
     };
-    update_placement_api_placements__placement_id__patch: {
+    update_placement_placements__placement_id__patch: {
         parameters: {
             query?: never;
             header?: never;
@@ -921,7 +1130,27 @@ export interface operations {
             };
         };
     };
-    create_upload_url_api_textures_upload_url_post: {
+    list_textures_textures_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TextureOut"][];
+                };
+            };
+        };
+    };
+    upload_texture_textures_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -930,9 +1159,40 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UploadURLRequest"];
+                "multipart/form-data": components["schemas"]["Body_upload_texture_textures_post"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TextureOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_texture_textures__texture_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                texture_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -940,7 +1200,67 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UploadURLResponse"];
+                    "application/json": components["schemas"]["TextureOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_texture_textures__texture_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                texture_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_texture_file_textures__texture_id__file_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                texture_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
