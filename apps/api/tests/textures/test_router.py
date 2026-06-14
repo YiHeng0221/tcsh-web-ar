@@ -153,3 +153,57 @@ async def test_get_unknown_texture_returns_404(
 
     response = await client.get(f"/textures/{uuid4()}")
     assert response.status_code == 404
+
+
+# glTF binary container magic — first 4 bytes of every .glb.
+_GLB = b"glTF" + bytes([0x02, 0, 0, 0]) + b"\x00" * 64
+
+
+@pytest.fixture
+def glb_settings(app: FastAPI, tmp_path: Path) -> Iterator[Settings]:
+    settings = Settings(
+        texture_allowed_mimes=["image/png", "model/gltf-binary"],
+        texture_max_size_bytes=1024 * 1024,
+        texture_storage_dir=tmp_path / "textures",
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    yield settings
+    app.dependency_overrides.pop(get_settings, None)
+
+
+async def test_upload_glb_texture_kind_model(
+    client: AsyncClient, glb_settings: Settings
+) -> None:
+    """A glb upload passes magic-byte validation and reports kind=model."""
+    res = await client.post(
+        "/textures",
+        files={"file": ("panel.glb", _GLB, "model/gltf-binary")},
+        data={"label": "3D panel"},
+    )
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["mime_type"] == "model/gltf-binary"
+    assert body["kind"] == "model"
+
+
+async def test_upload_glb_bad_magic_rejected(
+    client: AsyncClient, glb_settings: Settings
+) -> None:
+    """Arbitrary bytes declared as glb are rejected by the magic check."""
+    res = await client.post(
+        "/textures",
+        files={"file": ("fake.glb", b"NOTGLTF" + b"\x00" * 64, "model/gltf-binary")},
+        data={"label": "fake"},
+    )
+    # InvalidMimeError maps to 415 (same as a disallowed mime / bad ktx2).
+    assert res.status_code == 415, res.text
+
+
+async def test_png_kind_image(client: AsyncClient, glb_settings: Settings) -> None:
+    res = await client.post(
+        "/textures",
+        files={"file": ("p.png", _PNG, "image/png")},
+        data={"label": "flat"},
+    )
+    assert res.status_code == 201, res.text
+    assert res.json()["kind"] == "image"

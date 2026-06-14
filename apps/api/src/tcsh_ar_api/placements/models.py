@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from tcsh_ar_api.anchors.models import Anchor
@@ -49,6 +49,11 @@ class Placement(Base):
     )
     transform: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     uv_transform: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Mode C visibility toggle (artist hides a placement without deleting it).
+    # Mode A's render layer filters on this; default visible.
+    is_show: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("1"), nullable=False, default=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
