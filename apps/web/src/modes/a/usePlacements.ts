@@ -28,14 +28,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import type { Anchor, Placement } from "@/lib/api";
+import type { Anchor, Placement, components } from "@/lib/api";
+
+type Texture = components["schemas"]["TextureOut"];
 import { apiGet } from "@/lib/api/client";
 import { MOCK_PLACEMENTS, MOCK_STATION_ID } from "@/lib/ar/mock-placements";
 
-/** A render-ready quad in the anchor frame (metres). Mirrors `Transform`. */
+/** A render-ready placement in the anchor frame (metres). Mirrors `Transform`. */
 export type RenderPlacement = {
   id: string;
   textureUrl: string;
+  /** "image" → draw on a quad; "model" → load the URL as a glTF. Resolved
+   *  from the texture's mime on the backend (TextureOut.kind). */
+  kind: "image" | "model";
   /** Metres, anchor frame. */
   position: [x: number, y: number, z: number];
   /** Quaternion [x, y, z, w], anchor frame. */
@@ -53,12 +58,19 @@ export type UsePlacementsResult = {
 /** Same-origin API prefix (matches lib/api/client.ts's BASE). */
 const API_PREFIX = "/api";
 
-function toRenderPlacement(p: Placement): RenderPlacement | null {
+function toRenderPlacement(
+  p: Placement,
+  kindById: Map<string, "image" | "model">,
+): RenderPlacement | null {
   if (!p.texture_id) return null; // nothing to draw without a texture
+  if (p.is_show === false) return null; // artist hid it (Mode C is_show)
   const t = p.transform;
   return {
     id: p.id,
     textureUrl: `${API_PREFIX}/textures/${p.texture_id}/file`,
+    // Unknown texture (not in the index yet) → assume image; the quad path
+    // is the safe default, a glb on it just renders nothing.
+    kind: kindById.get(p.texture_id) ?? "image",
     position: [t.position.x, t.position.y, t.position.z],
     rotation: [t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w],
     scale: [t.scale.x, t.scale.y, t.scale.z],
@@ -70,6 +82,7 @@ function mockFallback(stationId: string | undefined): RenderPlacement[] {
   return MOCK_PLACEMENTS.map((p) => ({
     id: p.id,
     textureUrl: p.textureUrl,
+    kind: "image" as const, // mock fixtures are all 2D PNGs
     position: p.position,
     rotation: p.rotation,
     scale: p.scale,
@@ -103,10 +116,27 @@ export function usePlacements(
     retry: 1,
   });
 
+  // Texture index → kind map (image vs glb), so the render layer picks a
+  // path. Small list, session-stable; one query for every station.
+  const texturesQuery = useQuery({
+    queryKey: ["textures"],
+    queryFn: ({ signal }) => apiGet<Texture[]>("/textures", { signal }),
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  });
+
+  const kindById = useMemo(() => {
+    const m = new Map<string, "image" | "model">();
+    for (const t of texturesQuery.data ?? []) {
+      m.set(t.id, t.kind === "model" ? "model" : "image");
+    }
+    return m;
+  }, [texturesQuery.data]);
+
   const placements = useMemo<RenderPlacement[]>(() => {
     if (placementsQuery.data) {
       return placementsQuery.data
-        .map((p: Placement) => toRenderPlacement(p))
+        .map((p: Placement) => toRenderPlacement(p, kindById))
         .filter((p: RenderPlacement | null): p is RenderPlacement => p !== null);
     }
     // API path not (yet) available. While loading, render nothing — the
@@ -120,6 +150,7 @@ export function usePlacements(
     placementsQuery.data,
     placementsQuery.isError,
     anchorsQuery.isError,
+    kindById,
     stationId,
   ]);
 
