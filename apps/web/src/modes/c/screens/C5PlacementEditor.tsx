@@ -8,6 +8,7 @@ import type {
   Anchor,
   Placement,
   PlacementUpdate,
+  Quat,
   Vec3,
 } from "@/lib/api";
 
@@ -248,16 +249,27 @@ export default function C5PlacementEditor() {
       return apiPatch<Placement>(`/placements/${input.id}`, body);
     },
     onMutate: async ({ id, isShow }) => {
+      // Snapshot + cancel BOTH cache keys (AR list + C2 dashboard) so a
+      // failed PATCH rolls both back — otherwise C2's "已上貼圖" stats
+      // stay stale until the next manual invalidate.
       await queryClient.cancelQueries({ queryKey: ["placements"] });
+      await queryClient.cancelQueries({ queryKey: ["c", "placements"] });
       const previous = queryClient.getQueryData<Placement[]>(["placements"]);
+      const previousC = queryClient.getQueryData<Placement[]>([
+        "c",
+        "placements",
+      ]);
       queryClient.setQueryData<Placement[]>(["placements"], (prev) =>
         prev?.map((p) => (p.id === id ? { ...p, is_show: isShow } : p)),
       );
-      return { previous };
+      return { previous, previousC };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.previous) {
         queryClient.setQueryData(["placements"], ctx.previous);
+      }
+      if (ctx?.previousC) {
+        queryClient.setQueryData(["c", "placements"], ctx.previousC);
       }
     },
     onSuccess: (updated) => {
@@ -291,46 +303,36 @@ export default function C5PlacementEditor() {
   // the scaled value back immediately, then PATCHes it. We patch only
   // `transform` (round-tripping rotation) to avoid racing the form's
   // unsaved position edits onto the server.
+  // The caller resolves the ABSOLUTE target scale (and carries the current
+  // position/rotation so the PATCH round-trips them). Neither `mutationFn`
+  // nor `onMutate` reads scale from the cache — doing both was the
+  // factor-applied-twice bug (onMutate wrote S×factor, then mutationFn
+  // re-read it and multiplied again → server got S×factor²).
   const scaleMutation = useMutation({
-    mutationFn: async (input: { id: string; factor: number }) => {
-      // Read the freshest placement from the cache so consecutive scrolls
-      // compound rather than all multiplying the same stale base scale.
-      const list = queryClient.getQueryData<Placement[]>(["placements"]);
-      const current = list?.find((p) => p.id === input.id);
-      if (!current) throw new Error("placement 不存在");
-      const s = current.transform.scale;
+    mutationFn: async (input: {
+      id: string;
+      newScale: Vec3;
+      position: Vec3;
+      rotation: Quat;
+    }) => {
       const body: PlacementUpdate = {
         transform: {
-          position: current.transform.position,
-          rotation: current.transform.rotation,
-          scale: {
-            x: s.x * input.factor,
-            y: s.y * input.factor,
-            z: s.z * input.factor,
-          },
+          position: input.position,
+          rotation: input.rotation,
+          scale: input.newScale,
         },
       };
       return apiPatch<Placement>(`/placements/${input.id}`, body);
     },
-    onMutate: async ({ id, factor }) => {
-      // Optimistic: write the scaled value to the cache immediately so the
-      // canvas marker grows/shrinks live and the next scroll reads it.
+    onMutate: async ({ id, newScale }) => {
+      // Optimistic: write the absolute target so the canvas marker resizes
+      // live and the next scroll reads the already-updated value.
       await queryClient.cancelQueries({ queryKey: ["placements"] });
       const previous = queryClient.getQueryData<Placement[]>(["placements"]);
       queryClient.setQueryData<Placement[]>(["placements"], (prev) =>
         prev?.map((p) =>
           p.id === id
-            ? {
-                ...p,
-                transform: {
-                  ...p.transform,
-                  scale: {
-                    x: p.transform.scale.x * factor,
-                    y: p.transform.scale.y * factor,
-                    z: p.transform.scale.z * factor,
-                  },
-                },
-              }
+            ? { ...p, transform: { ...p.transform, scale: newScale } }
             : p,
         ),
       );
@@ -351,9 +353,21 @@ export default function C5PlacementEditor() {
   const handleScaleDelta = useCallback(
     (factor: number) => {
       if (!selectedId) return;
-      scaleMutation.mutate({ id: selectedId, factor });
+      // Resolve the absolute target ONCE here against the freshest cache;
+      // the mutation just persists it. Consecutive scrolls still compound
+      // because each reads the previous optimistic write.
+      const list = queryClient.getQueryData<Placement[]>(["placements"]);
+      const current = list?.find((p) => p.id === selectedId);
+      if (!current) return;
+      const s = current.transform.scale;
+      scaleMutation.mutate({
+        id: selectedId,
+        newScale: { x: s.x * factor, y: s.y * factor, z: s.z * factor },
+        position: current.transform.position,
+        rotation: current.transform.rotation,
+      });
     },
-    [selectedId, scaleMutation],
+    [selectedId, scaleMutation, queryClient],
   );
 
   // ── Deselect (Esc / empty click) ────────────────────────────────────

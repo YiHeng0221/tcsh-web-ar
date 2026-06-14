@@ -50,6 +50,12 @@ import { TEXTURE_DRAG_MIME } from "./TexturePalette";
  *    so the admin can sanity-check the whole composition. */
 export type CanvasViewMode = "isolation" | "preview";
 
+/** Which modifier scales (Cmd on mac, Ctrl elsewhere) — kept distinct from
+ *  the Ctrl orbit modifier so the two never fight over the same key. */
+const SCALE_USES_META =
+  typeof navigator !== "undefined" &&
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+
 /**
  * Right-handed, anchor-relative marker that visualises a single placement
  * inside the editor canvas. An image texture (or empty placement) renders
@@ -560,38 +566,46 @@ export function CanvasPlacementScene({
   // drag was an orbit gesture OrbitControls already serviced.
   const downRef = useRef<{ x: number; y: number; t: number } | null>(null);
 
-  function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    // Only arbitrate primary-button presses; secondary / middle are
-    // pan / dolly gestures owned entirely by OrbitControls.
-    if (e.button !== 0) {
-      downRef.current = null;
-      return;
-    }
-    downRef.current = { x: e.clientX, y: e.clientY, t: performance.now() };
-  }
+  // useCallback so the wrapper div's listeners don't churn on every
+  // canvas re-render (selection / gizmo-drag / Ctrl toggles all re-render).
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      // Only arbitrate primary-button presses; secondary / middle are
+      // pan / dolly gestures owned entirely by OrbitControls.
+      if (e.button !== 0) {
+        downRef.current = null;
+        return;
+      }
+      downRef.current = { x: e.clientX, y: e.clientY, t: performance.now() };
+    },
+    [],
+  );
 
-  function handlePointerUp(e: React.PointerEvent<HTMLDivElement>) {
-    const down = downRef.current;
-    downRef.current = null;
-    if (!down || e.button !== 0) return;
-    // A gizmo interaction (drag or click on the handles) is not a canvas
-    // click — bail so the deselect branch doesn't fire and kick the admin
-    // out of edit mode while they're nudging the gizmo.
-    if (gizmoActiveRef.current) return;
-    const dx = e.clientX - down.x;
-    const dy = e.clientY - down.y;
-    const moved = Math.hypot(dx, dy);
-    const elapsed = performance.now() - down.t;
-    // Drag → orbit already handled it; stay out of the way.
-    if (classifyPointerGesture(moved, elapsed) === "drag") return;
-    // Click → select the hit placement, or deselect on empty space.
-    const hitId = pickPlacementAt(e.clientX, e.clientY);
-    if (hitId) {
-      if (hitId !== selectedId) onSelect(hitId);
-    } else {
-      onDeselect?.();
-    }
-  }
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const down = downRef.current;
+      downRef.current = null;
+      if (!down || e.button !== 0) return;
+      // A gizmo interaction (drag or click on the handles) is not a canvas
+      // click — bail so the deselect branch doesn't fire and kick the admin
+      // out of edit mode while they're nudging the gizmo.
+      if (gizmoActiveRef.current) return;
+      const dx = e.clientX - down.x;
+      const dy = e.clientY - down.y;
+      const moved = Math.hypot(dx, dy);
+      const elapsed = performance.now() - down.t;
+      // Drag → orbit already handled it; stay out of the way.
+      if (classifyPointerGesture(moved, elapsed) === "drag") return;
+      // Click → select the hit placement, or deselect on empty space.
+      const hitId = pickPlacementAt(e.clientX, e.clientY);
+      if (hitId) {
+        if (hitId !== selectedId) onSelect(hitId);
+      } else {
+        onDeselect?.();
+      }
+    },
+    [pickPlacementAt, selectedId, onSelect, onDeselect, gizmoActiveRef],
+  );
 
   // ── Ctrl-orbit + Esc-deselect key handling ──────────────────────────
   useEffect(() => {
@@ -627,11 +641,16 @@ export function CanvasPlacementScene({
     const el = wrapperRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      if (!selectedId || !(e.metaKey || e.ctrlKey)) return;
-      // Ctrl is our orbit modifier; only Meta (Cmd) scales — but on
-      // non-mac the pinch-zoom gesture surfaces as ctrlKey+wheel, so we
-      // accept ctrl too *when it's a wheel with deltaY* and no orbit drag
-      // is in flight. Keep it simple: Meta on mac, Ctrl elsewhere.
+      if (!selectedId) return;
+      // The scale modifier is platform-specific and must NOT collide with
+      // the orbit modifier:
+      //   - mac: Cmd (metaKey) scales; Ctrl is reserved for orbit (above).
+      //   - others: Ctrl scales (mac's Ctrl+wheel pinch-zoom convention
+      //     doesn't apply, and these platforms have no Cmd).
+      // Picking one key per platform means a held Ctrl on mac keeps
+      // meaning "orbit", never "scale".
+      const scaleHeld = SCALE_USES_META ? e.metaKey : e.ctrlKey;
+      if (!scaleHeld) return;
       e.preventDefault();
       // Normalise direction: wheel up (deltaY < 0) grows, down shrinks.
       const factor = e.deltaY < 0 ? 1.05 : 0.95;
