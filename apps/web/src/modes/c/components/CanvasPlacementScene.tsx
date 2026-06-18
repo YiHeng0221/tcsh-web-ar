@@ -17,12 +17,12 @@ import type {
   Vector3,
 } from "three";
 import {
-  BoxGeometry,
   CanvasTexture,
   DoubleSide,
   EdgesGeometry,
   LineBasicMaterial,
   LineSegments,
+  PlaneGeometry,
   Raycaster,
   Texture as ThreeTexture,
   TextureLoader,
@@ -212,8 +212,12 @@ function PlacementImageMarker({
   const emissiveIntensity = dropHovered ? 0.7 : selected ? 0.35 : 0;
 
   return (
+    // A flat quad (not a cube): an image placement is a texture painted onto
+    // one face of the artwork, so it must show the texture itself — a box
+    // pasted the same image on all six sides and read as a plain block.
+    // Matches Mode A's ARScene render. scale.z is unused (2D), same as there.
     <mesh castShadow receiveShadow name={PLACEMENT_MESH_NAME}>
-      <boxGeometry args={[1, 1, 1]} />
+      <planeGeometry args={[1, 1]} />
       <meshStandardMaterial
         color={textureImage ? "#ffffff" : baseColor}
         map={textureImage}
@@ -316,14 +320,15 @@ function PlacementGlbTexture({
 }
 
 /**
- * Cyan wireframe outline drawn around the unit-cube placement marker. We
+ * Cyan wireframe outline drawn around the unit-quad placement marker. We
  * build it by hand (rather than `<Edges>` from drei) so the line material
  * stays opaque on top of the textured face — `<Edges>` overlays as a
- * regular line segment and z-fights when a texture is applied.
+ * regular line segment and z-fights when a texture is applied. A plane
+ * outline (not a cube) so it frames the flat marker instead of boxing it.
  */
 function PlacementOutline({ color = "#00e5ff" }: { color?: string }) {
   const lines = useMemo(() => {
-    const geom = new EdgesGeometry(new BoxGeometry(1.001, 1.001, 1.001));
+    const geom = new EdgesGeometry(new PlaneGeometry(1.001, 1.001));
     const mat = new LineBasicMaterial({ color });
     return new LineSegments(geom, mat);
   }, [color]);
