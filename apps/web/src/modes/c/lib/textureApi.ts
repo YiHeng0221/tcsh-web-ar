@@ -38,25 +38,21 @@ export function textureKind(texture: Pick<Texture, "kind">): TextureKind {
   return texture.kind === "model" ? "model" : "image";
 }
 
-interface ViteEnv {
-  readonly VITE_API_BASE_URL?: string;
-}
-
-const env = import.meta.env as unknown as ViteEnv;
-const API_BASE = env.VITE_API_BASE_URL ?? "";
-
 /**
  * Resolve a render-able URL for a texture's binary endpoint.
  *
- * The API returns `file_url` as an absolute path (`/textures/<id>/file`).
- * In dev we want to hit the FastAPI server directly (so the browser loads
- * the bytes from `http://localhost:8000`); in prod the same convention
- * works as long as `VITE_API_BASE_URL` is set at build time. If it's
- * missing we fall back to a relative path so a misconfiguration is loud
- * (broken image) rather than silently wrong.
+ * The API returns `file_url` as a host-relative path (`/textures/<id>/file`).
+ * We prefix the same-origin `/api` proxy that `lib/api/client.ts` uses for
+ * every request — NOT `VITE_API_BASE_URL`. An absolute `http://localhost:8000`
+ * URL gets blocked as mixed content from the https dev origin
+ * (`make web-dev-https`), which left every texture (image + glb) blank in
+ * Mode C while curl — which ignores mixed-content — wrongly reported 200.
+ * Same-origin keeps the bytes on the secure origin in dev and behind the
+ * reverse proxy in prod.
  */
+const API_PREFIX = "/api";
+
 export function textureUrl(texture: Pick<Texture, "file_url">): string {
   if (!texture.file_url) return "";
-  if (!API_BASE) return texture.file_url;
-  return `${API_BASE}${texture.file_url}`;
+  return `${API_PREFIX}${texture.file_url}`;
 }
